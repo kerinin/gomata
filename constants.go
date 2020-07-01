@@ -5,6 +5,11 @@ import "fmt"
 type FirmataCommand byte
 type SysExCommand byte
 type SerialPort byte
+type WireCount byte
+type StepType byte
+type HasEnablePin byte
+type Inversions byte
+type IsEnabled byte
 
 // Pin Modes
 const (
@@ -26,6 +31,27 @@ const (
 	HardSerial1 SerialPort = 0x01
 	HardSerial2 SerialPort = 0x02
 	HardSerial3 SerialPort = 0x03
+
+	Driver    WireCount = 0b0010000
+	TwoWire   WireCount = 0b0100000
+	ThreeWire WireCount = 0b0110000
+	FourWire  WireCount = 0b1000000
+
+	WholeStep   StepType = 0b0000000
+	HalfStep    StepType = 0b0000010
+	QuarterStep StepType = 0b0000100
+
+	InvertPin1      Inversions = 0b0000001
+	InvertPin2      Inversions = 0b0000010
+	InvertPin3      Inversions = 0b0000100
+	InvertPin4      Inversions = 0b0001000
+	InvertEnablePin Inversions = 0b0010000
+
+	EnablePin   HasEnablePin = 0b0000000
+	NoEnablePin HasEnablePin = 0b0000001
+
+	Enabled    IsEnabled = 0b1111111
+	NotEnabled IsEnabled = 0b0000000
 
 	I2CModeWrite          byte = 0x00
 	I2CModeRead           byte = 0x01
@@ -75,6 +101,8 @@ const (
 	SysExNonRealtime      SysExCommand = 0x7E // MIDI Reserved for non-realtime messages
 	SysExRealtime         SysExCommand = 0x7F // MIDI Reserved for realtime messages
 	SysExSPI              SysExCommand = 0x80
+	StepperReportPosition SysExCommand = 0x06
+	StepperMoveComplete   SysExCommand = 0x0A
 )
 
 func (c FirmataCommand) String() string {

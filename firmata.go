@@ -215,6 +215,82 @@ func (f *Firmata) I2cConfig(delay int) error {
 	return f.writeSysex([]byte{byte(I2CConfig), byte(delay & 0xFF), byte((delay >> 8) & 0xFF)})
 }
 
+func (f *Firmata) StepperConfigure(devID int, wireCount WireCount, stepType StepType, hasEnable HasEnablePin, pin1 int, pin2 int, pin3 int, pin4 int, invert Inversions) error {
+	return f.writeSysex([]byte{
+		0x62, // AccelStepper data
+		0x00, // Command
+		byte(devID),
+		byte(wireCount) | byte(stepType) | byte(hasEnable),
+		byte(pin1),
+		byte(pin2),
+		byte(pin3),
+		byte(pin4),
+		byte(invert),
+	})
+}
+
+func (f *Firmata) StepperZero(devID int) error {
+	return f.writeSysex([]byte{0x62, 0x01, byte(devID)})
+}
+
+func (f *Firmata) StepperStep(devID int, v int32) error {
+	return f.writeSysex(append([]byte{0x62, 0x02, byte(devID)}, integerBytes(v)...))
+}
+
+func (f *Firmata) StepperTo(devID int, v int32) error {
+	return f.writeSysex(append([]byte{0x62, 0x03, byte(devID)}, integerBytes(v)...))
+}
+
+func (f *Firmata) StepperEnable(devID int, high IsEnabled) error {
+	return f.writeSysex([]byte{0x62, 0x04, byte(devID), byte(high)})
+}
+
+func (f *Firmata) StepperStop(devID int) error {
+	return f.writeSysex([]byte{0x62, 0x05})
+}
+
+func (f *Firmata) StepperReport(devID int) error {
+	return f.writeSysex([]byte{0x62, 0x06})
+}
+
+func (f *Firmata) StepperSetAcceleration(devID int, v float32) error {
+	return f.writeSysex(append([]byte{0x62, 0x08}, floatBytes(v)...))
+}
+
+func (f *Firmata) StepperSetSpeed(devID int, v float32) error {
+	return f.writeSysex(append([]byte{0x62, 0x09}, floatBytes(v)...))
+}
+
+func integerBytes(v int32) []byte {
+	return []byte{
+		byte(v & 0b00000000000000000000000000111111),
+		byte(v & 0b00000000000000000000111111000000 >> 6),
+		byte(v & 0b00000000000000111111000000000000 >> 12),
+		byte(v & 0b00000000111111000000000000000000 >> 18),
+		byte(v & 0b00111111000000000000000000000000 >> 24),
+	}
+
+	buf := make([]byte, 5)
+	return buf
+}
+
+func floatBytes(v float32) []byte {
+	var (
+		bits = math.Float32bits(v)
+
+		signBits     = bits & 0b10000000000000000000000000000000
+		exponentBits = bits & 0b01111111100000000000000000000000
+		significand  = bits & 0b00000000011111111111111111111111
+
+		sign     = signBits >> 31
+		exponent = int32(exponentBits>>23) - 127
+
+		binary = int32(sign<<27) | exponent<<23 | int32(significand)
+	)
+
+	return integerBytes(binary)
+}
+
 func (f *Firmata) togglePinReporting(pin int, state int, mode byte) error {
 	if state != 0 {
 		state = 1
@@ -431,6 +507,11 @@ func (f *Firmata) parseSysEx(data []byte) {
 	case StringData:
 		str := data[:]
 		f.logger.Printf("StringData%v", string(str[:len(str)-1]))
+
+	case StepperReportPosition:
+		// TODO: parse data
+	case StepperMoveComplete:
+		// TODO: parse data
 	}
 }
 
