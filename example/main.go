@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/kerinin/gomata"
 	log "github.com/sirupsen/logrus"
 	"github.com/tarm/serial"
 )
@@ -30,7 +31,7 @@ func main() {
 		}
 	}()
 
-	f := New()
+	f := gomata.New()
 
 	log.Infof("opening port")
 	port, err := serial.OpenPort(&serial.Config{Name: "/dev/tty.usbmodem14301", Baud: 9600})
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	log.Infof("configuring stepper")
-	err = f.StepperConfigure(devID, Driver, WholeStep, EnablePin, 9, 8, 0, 0, 7, 0)
+	err = f.StepperConfigure(devID, gomata.Driver, gomata.WholeStep, gomata.EnablePin, 9, 8, 0, 0, 7, 0)
 	if err != nil {
 		log.Fatalf("failed to configure stepper: %s", err)
 	}
@@ -65,7 +66,7 @@ func main() {
 
 	// NOTE: The motor is enabled by default
 	log.Infof("enabling stepper")
-	err = f.StepperEnable(devID, Enabled)
+	err = f.StepperEnable(devID, gomata.Enabled)
 	if err != nil {
 		log.Fatalf("failed to set enabled: %s", err)
 	}
@@ -85,7 +86,7 @@ func main() {
 		}
 	case msg := <-f.StepperMoveCompletions():
 		log.Infof("disabling stepper: %+v", msg)
-		err = f.StepperEnable(devID, NotEnabled)
+		err = f.StepperEnable(devID, gomata.NotEnabled)
 		if err != nil {
 			log.Fatalf("failed to set enabled: %s", err)
 		}
