@@ -50,37 +50,40 @@ func main() {
 		log.Fatalf("failed to configure stepper: %s", err)
 	}
 
-	// log.Printf("setting acceleration")
-	// err = f.StepperSetAcceleration(devID, 0.0)
-	// if err != nil {
-	// 	log.Fatalf("failed to set acceleration: %s", err)
-	// }
-
-	log.Printf("setting speed")
-	err = f.StepperSetSpeed(devID, 200.0)
+	var spd = float32(800.0)
+	log.Printf("setting speed %f", spd)
+	err = f.StepperSetSpeed(devID, spd)
 	if err != nil {
 		log.Fatalf("failed to set speed: %s", err)
 	}
 
+	var acc = spd / 8
+	log.Printf("setting acceleration %f", acc)
+	err = f.StepperSetAcceleration(devID, acc)
+	if err != nil {
+		log.Fatalf("failed to set acceleration: %s", err)
+	}
+
 	// NOTE: The motor is enabled by default
-	// log.Printf("enabling stepper")
-	// err = f.StepperEnable(devID, Enabled)
-	// if err != nil {
-	// 	log.Fatalf("failed to set enabled: %s", err)
-	// }
+	log.Printf("enabling stepper")
+	err = f.StepperEnable(devID, Enabled)
+	if err != nil {
+		log.Fatalf("failed to set enabled: %s", err)
+	}
 	// log.Printf("disabling stepper")
 	// err = f.StepperEnable(devID, NotEnabled)
 	// if err != nil {
 	// 	log.Fatalf("failed to set enabled: %s", err)
 	// }
 
-	log.Printf("moving to 5000")
-	err = f.StepperTo(devID, 5000)
+	var to = (spd * 5)
+	log.Printf("moving to %f", to)
+	err = f.StepperTo(devID, int32(to))
 	if err != nil {
 		log.Fatalf("failed to request move: %s", err)
 	}
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(2000 * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:

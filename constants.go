@@ -4,6 +4,7 @@ import "fmt"
 
 type FirmataCommand byte
 type SysExCommand byte
+type StepperCommand byte
 type SerialPort byte
 type WireCount byte
 type StepType byte
@@ -102,8 +103,12 @@ const (
 	SysExRealtime         SysExCommand = 0x7F // MIDI Reserved for realtime messages
 	SysExSPI              SysExCommand = 0x80
 	StepperData           SysExCommand = 0x62
-	StepperReportPosition SysExCommand = 0x06
-	StepperMoveComplete   SysExCommand = 0x0A
+)
+
+// Stepper Commands
+const (
+	StepperReportPosition StepperCommand = 0x06
+	StepperMoveComplete   StepperCommand = 0x0A
 )
 
 func (c FirmataCommand) String() string {
@@ -172,10 +177,6 @@ func (c SysExCommand) String() string {
 		return fmt.Sprintf("SPI (0x%x)", uint8(c))
 	case c == StepperData:
 		return fmt.Sprintf("StepperData (0x%x)", uint8(c))
-	case c == StepperReportPosition:
-		return fmt.Sprintf("StepperReportPosition (0x%x)", uint8(c))
-	case c == StepperMoveComplete:
-		return fmt.Sprintf("StepperMoveComplete (0x%x)", uint8(c))
 	}
 	return fmt.Sprintf("Unexpected SysEx command (0x%02x)", uint8(c))
 }
