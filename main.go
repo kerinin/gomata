@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
-	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/tarm/serial"
 )
 
@@ -33,7 +32,7 @@ func main() {
 
 	f := New()
 
-	log.Printf("opening port")
+	log.Infof("opening port")
 	port, err := serial.OpenPort(&serial.Config{Name: "/dev/tty.usbmodem14301", Baud: 9600})
 	if err != nil {
 		log.Fatalf("failed to open serial port: %s", err)
@@ -44,56 +43,51 @@ func main() {
 		log.Fatalf("failed to connect to serial port: %s", err)
 	}
 
-	log.Printf("configuring stepper")
+	log.Infof("configuring stepper")
 	err = f.StepperConfigure(devID, Driver, WholeStep, EnablePin, 9, 8, 0, 0, 7, 0)
 	if err != nil {
 		log.Fatalf("failed to configure stepper: %s", err)
 	}
 
-	var spd = float32(800.0)
-	log.Printf("setting speed %f", spd)
+	var spd = float32(400.0)
+	log.Infof("setting speed %f", spd)
 	err = f.StepperSetSpeed(devID, spd)
 	if err != nil {
 		log.Fatalf("failed to set speed: %s", err)
 	}
 
 	var acc = spd / 8
-	log.Printf("setting acceleration %f", acc)
+	log.Infof("setting acceleration %f", acc)
 	err = f.StepperSetAcceleration(devID, acc)
 	if err != nil {
 		log.Fatalf("failed to set acceleration: %s", err)
 	}
 
 	// NOTE: The motor is enabled by default
-	log.Printf("enabling stepper")
+	log.Infof("enabling stepper")
 	err = f.StepperEnable(devID, Enabled)
 	if err != nil {
 		log.Fatalf("failed to set enabled: %s", err)
 	}
-	// log.Printf("disabling stepper")
-	// err = f.StepperEnable(devID, NotEnabled)
-	// if err != nil {
-	// 	log.Fatalf("failed to set enabled: %s", err)
-	// }
 
 	var to = (spd * 5)
-	log.Printf("moving to %f", to)
+	log.Infof("moving to %f", to)
 	err = f.StepperTo(devID, int32(to))
 	if err != nil {
 		log.Fatalf("failed to request move: %s", err)
 	}
 
-	ticker := time.NewTicker(2000 * time.Millisecond)
-	for {
-		select {
-		case <-ticker.C:
-			// err = f.StepperReport(devID)
-			// if err != nil {
-			// 	log.Fatalf("failed to request report: %s", err)
-			// }
-		case <-ctx.Done():
-			return
+	select {
+	case <-ctx.Done():
+		err = f.StepperStop(devID)
+		if err != nil {
+			log.Fatalf("failed to stop motor: %s", err)
+		}
+	case msg := <-f.StepperMoveCompletions():
+		log.Infof("disabling stepper: %+v", msg)
+		err = f.StepperEnable(devID, NotEnabled)
+		if err != nil {
+			log.Fatalf("failed to set enabled: %s", err)
 		}
 	}
-
 }

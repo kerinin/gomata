@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
-	"os"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // Errors
@@ -16,16 +16,19 @@ var ErrConnected = errors.New("client is already connected")
 
 // Firmata represents a client connection to a firmata board
 type Firmata struct {
-	pins              []Pin
-	FirmwareName      string
-	ProtocolVersion   string
-	connected         bool
-	connection        io.ReadWriteCloser
-	analogPins        []int
-	ready             bool
-	analogMappingDone bool
-	capabilityDone    bool
-	logger            *log.Logger
+	pins                   []Pin
+	FirmwareName           string
+	ProtocolVersion        string
+	connected              bool
+	connection             io.ReadWriteCloser
+	analogPins             []int
+	ready                  bool
+	analogMappingDone      bool
+	capabilityDone         bool
+	pinStates              chan Pin
+	i2cReplies             chan I2cReply
+	stepperReports         chan StepperPosition
+	stepperMoveCompletions chan StepperPosition
 }
 
 // Pin represents a pin on the firmata board
@@ -52,13 +55,16 @@ type StepperPosition struct {
 // New returns a new Firmata
 func New() *Firmata {
 	c := &Firmata{
-		ProtocolVersion: "",
-		FirmwareName:    "",
-		connection:      nil,
-		pins:            []Pin{},
-		analogPins:      []int{},
-		connected:       false,
-		logger:          log.New(os.Stdout, "[firmata] ", log.Ltime),
+		ProtocolVersion:        "",
+		FirmwareName:           "",
+		connection:             nil,
+		pins:                   []Pin{},
+		analogPins:             []int{},
+		connected:              false,
+		pinStates:              make(chan Pin),
+		i2cReplies:             make(chan I2cReply),
+		stepperReports:         make(chan StepperPosition),
+		stepperMoveCompletions: make(chan StepperPosition),
 	}
 
 	return c
@@ -103,7 +109,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 		case <-t.C:
 			// Do nothing
 		case <-time.After(time.Second * 15):
-			f.logger.Print("No response in 15 seconds. Resetting device")
+			log.Warn("No response in 15 seconds. Resetting device")
 			f.Reset()
 		case <-time.After(time.Second * 30):
 			// Close connections
@@ -113,7 +119,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	}
 
 	// Firmata creation successful
-	f.logger.Print("Firmata ready to use")
+	log.Debug("Firmata ready to use")
 	return nil
 }
 
@@ -293,6 +299,22 @@ func (f *Firmata) StepperSetSpeed(devID int, v float32) error {
 	return f.writeSysex(append([]byte{0x62, 0x09, byte(devID)}, floatBytes(v)...))
 }
 
+func (f *Firmata) PinStates() <-chan Pin {
+	return f.pinStates
+}
+
+func (f *Firmata) I2cReplies() <-chan I2cReply {
+	return f.i2cReplies
+}
+
+func (f *Firmata) StepperReports() <-chan StepperPosition {
+	return f.stepperReports
+}
+
+func (f *Firmata) StepperMoveCompletions() <-chan StepperPosition {
+	return f.stepperMoveCompletions
+}
+
 func integerFromBytes(arg1, arg2, arg3, arg4, arg5 byte) int32 {
 	var result = (int32(arg1) & 0x7F) |
 		((int32(arg2) & 0x7F) << 7) |
@@ -431,16 +453,16 @@ func (f *Firmata) process() {
 	for {
 		b, err := r.ReadByte()
 		if err != nil {
-			f.logger.Panic(err)
+			log.Panic(err)
 			return
 		}
 		cmd := FirmataCommand(b)
-		f.logger.Printf("Incoming cmd %v", cmd)
+		log.Debugf("Incoming cmd %v", cmd)
 
 		// First received byte must be ReportVersion command
 		if !init {
 			if cmd != ProtocolVersion {
-				f.logger.Printf("Discarding unexpected command byte %0d (not initialized)\n", b)
+				log.Warn("Discarding unexpected command byte %0d (not initialized)\n", b)
 				continue
 			} else {
 				init = true
@@ -451,16 +473,16 @@ func (f *Firmata) process() {
 		case ProtocolVersion == cmd:
 			buf, err := f.read(2)
 			if err != nil {
-				f.logger.Panic(err)
+				log.Panic(err)
 				return
 			}
 			f.ProtocolVersion = fmt.Sprintf("%v.%v", buf[0], buf[1])
-			f.logger.Printf("Protocol version: %s", f.ProtocolVersion)
+			log.Debugf("Protocol version: %s", f.ProtocolVersion)
 			f.FirmwareQuery()
 		case AnalogMessageRangeStart <= cmd && AnalogMessageRangeEnd >= cmd:
 			buf, err := f.read(2)
 			if err != nil {
-				f.logger.Panic(err)
+				log.Panic(err)
 				return
 			}
 
@@ -470,13 +492,13 @@ func (f *Firmata) process() {
 			if len(f.analogPins) > pin {
 				if len(f.pins) > f.analogPins[pin] {
 					f.pins[f.analogPins[pin]].Value = int(value)
-					f.logger.Printf("AnalogRead%v", pin)
+					log.Debugf("AnalogRead%v", pin)
 				}
 			}
 		case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
 			buf, err := f.read(2)
 			if err != nil {
-				f.logger.Panic(err)
+				log.Panic(err)
 				return
 			}
 			port := cmd & 0x0F
@@ -486,14 +508,14 @@ func (f *Firmata) process() {
 				if len(f.pins) > pinNumber {
 					if f.pins[pinNumber].Mode == Input {
 						f.pins[pinNumber].Value = int((portValue >> (byte(i) & 0x07)) & 0x01)
-						f.logger.Printf("DigitalRead%v", pinNumber)
+						log.Debugf("DigitalRead%v", pinNumber)
 					}
 				}
 			}
 		case StartSysex == cmd:
 			sysExData, err := r.ReadSlice(byte(EndSysex))
 			if err != nil {
-				f.logger.Panic(err)
+				log.Panic(err)
 				break
 			}
 			// Remove EndSysEx byte
@@ -535,7 +557,7 @@ func (f *Firmata) parseSysEx(data []byte) {
 			}
 			n ^= 1
 		}
-		f.logger.Printf("Total pins: %v\n", len(f.pins))
+		log.Debugf("Total pins: %v\n", len(f.pins))
 		f.AnalogMappingQuery()
 	case AnalogMappingResponse:
 		f.analogPins = []int{}
@@ -546,7 +568,7 @@ func (f *Firmata) parseSysEx(data []byte) {
 			}
 			// fmt.Println(index, ":", f.pins[index].AnalogChannel, ":", val)
 		}
-		f.logger.Printf("pin -> channel: %v\n", f.analogPins)
+		log.Debugf("pin -> channel: %v\n", f.analogPins)
 		f.connected = true
 	case PinStateResponse:
 		pin := data[0]
@@ -559,7 +581,11 @@ func (f *Firmata) parseSysEx(data []byte) {
 		if len(data) > 4 {
 			f.pins[pin].State = int(uint(f.pins[pin].State) | uint(data[4])<<14)
 		}
-		f.logger.Printf("PinState%v", pin)
+		select {
+		case f.pinStates <- f.pins[pin]:
+		default:
+			log.Debugf("PinState%v", pin)
+		}
 	case I2CReply:
 		reply := I2cReply{
 			Address:  int(byte(data[0]) | byte(data[1])<<7),
@@ -577,7 +603,11 @@ func (f *Firmata) parseSysEx(data []byte) {
 				byte(data[i])|byte(data[i+1])<<7,
 			)
 		}
-		f.logger.Printf("I2cReply%v", reply)
+		select {
+		case f.i2cReplies <- reply:
+		default:
+			log.Warnf("Failed to send I2cReply: %v", reply)
+		}
 	case FirmwareQuery:
 		name := []byte{}
 		for _, val := range data[2:(len(data) - 1)] {
@@ -586,11 +616,11 @@ func (f *Firmata) parseSysEx(data []byte) {
 			}
 		}
 		f.FirmwareName = string(name[:])
-		f.logger.Printf("Firmware: %s", f.FirmwareName)
+		log.Debugf("Firmware: %s", f.FirmwareName)
 		f.CapabilitiesQuery()
 	case StringData:
 		str := data[:]
-		f.logger.Printf("StringData: '%v'", string(str[:len(str)-1]))
+		log.Debugf("StringData: '%v'", string(str[:len(str)-1]))
 	case StepperData:
 		switch StepperCommand(data[0]) {
 		case StepperReportPosition:
@@ -598,41 +628,49 @@ func (f *Firmata) parseSysEx(data []byte) {
 				DeviceID: int32(byte(data[1])),
 				Position: integerFromBytes(data[2], data[3], data[4], data[5], data[6]),
 			}
-			f.logger.Printf("StepperPosition: %+v", reply)
+			select {
+			case f.stepperReports <- reply:
+			default:
+				log.Warnf("Failed to send StepperPosition: %+v", reply)
+			}
 		case StepperMoveComplete:
 			reply := StepperPosition{
 				DeviceID: int32(byte(data[1])),
 				Position: integerFromBytes(data[2], data[3], data[4], data[5], data[6]),
 			}
-			f.logger.Printf("StepperMoveComplete: %+v", reply)
+			select {
+			case f.stepperMoveCompletions <- reply:
+			default:
+				log.Warnf("Failed to send StepperMoveComplete: %+v", reply)
+			}
 		}
 	}
 }
 
 func (f *Firmata) printByteArray(title string, data []uint8) {
-	fmt.Println()
-	f.logger.Println(title)
+	log.Debug("")
+	log.Debug(title)
 	str := ""
 	for index, b := range data {
 		str += fmt.Sprintf("0x%02X ", b)
 		if (index+1)%8 == 0 || index == len(data)-1 {
-			f.logger.Println(str)
+			log.Debug(str)
 			str = ""
 		}
 	}
-	fmt.Println()
+	log.Debug("")
 }
 
 func (f *Firmata) printSysExData(title string, cmd SysExCommand, data []uint8) {
-	fmt.Println()
-	f.logger.Println(title, "-", cmd)
+	log.Debug("")
+	log.Debug(title, "-", cmd)
 	str := ""
 	for index, b := range data {
 		str += fmt.Sprintf("0x%02X ", b)
 		if (index+1)%8 == 0 || index == len(data)-1 {
-			f.logger.Println(str)
+			log.Debug(str)
 			str = ""
 		}
 	}
-	fmt.Println()
+	log.Debug("")
 }
