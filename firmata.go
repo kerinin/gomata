@@ -96,30 +96,70 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 
 	f.connection = conn
 
-	// Start threads
-	go f.process()
+	err = f.Reset()
+	log.Infof("Waiting 4s for reset...")
+	<-time.After(4 * time.Second)
 
-	// Reset device
-	f.Reset()
+	var (
+		r    = bufio.NewReader(f.connection)
+		data []byte
+	)
 
-	// Wait for device to response
-	t := time.NewTicker(time.Second)
-	for !f.connected {
-		select {
-		case <-t.C:
-			// Do nothing
-		case <-time.After(time.Second * 15):
-			log.Warn("No response in 15 seconds. Resetting device")
-			f.Reset()
-		case <-time.After(time.Second * 30):
-			// Close connections
-			f.connection.Close()
-			return errors.New("Unable to initialize connection")
-		}
+	// // Get protocol version
+	// err = f.ProtocolVersionQuery()
+	// if err != nil {
+	// 	return fmt.Errorf("querying protocol version: %w", err)
+	// }
+	// data, err = f.readNext(r, ProtocolVersion)
+	// if err != nil {
+	// 	return fmt.Errorf("getting protocol version: %w", err)
+	// }
+	// f.ProtocolVersion = fmt.Sprintf("%v.%v", data[0], data[1])
+	// log.Infof("Protocol version: %s", f.ProtocolVersion)
+
+	// Get firmware
+	err = f.FirmwareQuery()
+	if err != nil {
+		return fmt.Errorf("querying firmware: %w", err)
 	}
+	data, err = f.readNextSysEx(r, FirmwareQuery)
+	if err != nil {
+		return fmt.Errorf("getting firmware: %w", err)
+	}
+	f.FirmwareName = parseFirmware(data)
+	log.Infof("Firmware: %s", f.FirmwareName)
+
+	// Get capabilities
+	err = f.CapabilitiesQuery()
+	if err != nil {
+		return fmt.Errorf("querying capabilities: %w", err)
+	}
+	data, err = f.readNextSysEx(r, CapabilityResponse)
+	if err != nil {
+		return fmt.Errorf("getting capabilities: %w", err)
+	}
+	f.pins = parseCapabilityResponse(data)
+
+	// Get analog pins
+	err = f.AnalogMappingQuery()
+	if err != nil {
+		return fmt.Errorf("querying analog mapping: %w", err)
+	}
+	data, err = f.readNextSysEx(r, AnalogMappingResponse)
+	if err != nil {
+		return fmt.Errorf("getting analog mapping: %w", err)
+	}
+	f.pins, f.analogPins = mergeAnalogMappingResponse(f.pins, data)
+	for i, pin := range f.pins {
+		log.Infof("Pin %d: %+v", i, pin)
+	}
+	log.Infof("Analog Pins: %v", f.analogPins)
+
+	// Start threads
+	go f.process(r)
 
 	// Firmata creation successful
-	log.Debug("Firmata ready to use")
+	log.Info("Firmata ready to use")
 	return nil
 }
 
@@ -419,8 +459,9 @@ func (f *Firmata) writeSysex(data []byte) (err error) {
 }
 
 func (f *Firmata) write(data []byte) (err error) {
+	f.printByteArray("Data write", data)
 	_, err = f.connection.Write(data[:])
-	return
+	return err
 }
 
 func (f *Firmata) sendCommand(cmd []byte) error {
@@ -447,38 +488,95 @@ func (f *Firmata) read(length int) (buf []byte, err error) {
 	return
 }
 
-func (f *Firmata) process() {
-	r := bufio.NewReader(f.connection)
-	var init bool
+func (f *Firmata) readNext(r *bufio.Reader, searchCmd FirmataCommand) ([]byte, error) {
 	for {
-		b, err := r.ReadByte()
+		cmd, data, err := f.readCommand(r)
 		if err != nil {
-			log.Panic(err)
-			return
+			return nil, fmt.Errorf("reading command: %w", err)
 		}
-		cmd := FirmataCommand(b)
-		log.Debugf("Incoming cmd %v", cmd)
+		if cmd != searchCmd {
+			log.Infof("ignoring command %s, waiting for %s", cmd, searchCmd)
+			continue
+		}
+		return data, nil
+	}
+}
 
-		// First received byte must be ReportVersion command
-		if !init {
-			if cmd != ProtocolVersion {
-				log.Warn("Discarding unexpected command byte %0d (not initialized)\n", b)
-				continue
-			} else {
-				init = true
-			}
+func (f *Firmata) readNextSysEx(r *bufio.Reader, searchCmd SysExCommand) ([]byte, error) {
+	for {
+		cmd, data, err := f.readCommand(r)
+		if err != nil {
+			return nil, fmt.Errorf("reading command: %w", err)
+		}
+		if cmd != StartSysex {
+			log.Infof("ignoring command %s, waiting for %s", cmd, searchCmd)
+			continue
+		}
+
+		sysExCommand := SysExCommand(data[0])
+		if sysExCommand != searchCmd {
+			log.Infof("ignoring sysex command %s != %s", sysExCommand, searchCmd)
+			continue
+		}
+
+		return data[1 : len(data)-1], nil
+	}
+}
+
+func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
+	b, err := r.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	cmd := FirmataCommand(b)
+
+	switch {
+	case ProtocolVersion == cmd:
+		buf, err := f.read(2)
+		if err != nil {
+			return 0, nil, err
+		}
+		f.printByteArray("Read Protocol Version:", buf)
+		return ProtocolVersion, buf, nil
+
+	case AnalogMessageRangeStart <= cmd && AnalogMessageRangeEnd >= cmd:
+		buf, err := f.read(2)
+		if err != nil {
+			return 0, nil, err
+		}
+		f.printByteArray("Read Analog Message:", buf)
+		return AnalogMessage, buf, nil
+
+	case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
+		buf, err := f.read(2)
+		if err != nil {
+			return 0, nil, err
+		}
+		f.printByteArray("Read Digital Message:", buf)
+		return DigitalMessage, buf, nil
+
+	case StartSysex == cmd:
+		buf, err := r.ReadSlice(byte(EndSysex))
+		if err != nil {
+			return 0, nil, err
+		}
+
+		f.printByteArray("Read SysEx:", buf)
+		return StartSysex, buf, nil
+
+	default:
+		return 0, nil, fmt.Errorf("Unhandled command %s", cmd)
+	}
+}
+
+func (f *Firmata) process(r *bufio.Reader) {
+	for {
+		cmd, data, err := f.readCommand(r)
+		if err != nil {
+			log.Panic("Reading command %s: %s", cmd, err)
 		}
 
 		switch {
-		case ProtocolVersion == cmd:
-			buf, err := f.read(2)
-			if err != nil {
-				log.Panic(err)
-				return
-			}
-			f.ProtocolVersion = fmt.Sprintf("%v.%v", buf[0], buf[1])
-			log.Debugf("Protocol version: %s", f.ProtocolVersion)
-			f.FirmwareQuery()
 		case AnalogMessageRangeStart <= cmd && AnalogMessageRangeEnd >= cmd:
 			buf, err := f.read(2)
 			if err != nil {
@@ -492,9 +590,10 @@ func (f *Firmata) process() {
 			if len(f.analogPins) > pin {
 				if len(f.pins) > f.analogPins[pin] {
 					f.pins[f.analogPins[pin]].Value = int(value)
-					log.Debugf("AnalogRead%v", pin)
+					log.Debugf("AnalogRead %v: %d", pin, f.pins[f.analogPins[pin]].Value)
 				}
 			}
+
 		case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
 			buf, err := f.read(2)
 			if err != nil {
@@ -508,20 +607,67 @@ func (f *Firmata) process() {
 				if len(f.pins) > pinNumber {
 					if f.pins[pinNumber].Mode == Input {
 						f.pins[pinNumber].Value = int((portValue >> (byte(i) & 0x07)) & 0x01)
-						log.Debugf("DigitalRead%v", pinNumber)
+						log.Debugf("DigitalRead %v: %d", pinNumber, f.pins[pinNumber].Value)
 					}
 				}
 			}
+
 		case StartSysex == cmd:
-			sysExData, err := r.ReadSlice(byte(EndSysex))
-			if err != nil {
-				log.Panic(err)
-				break
-			}
-			// Remove EndSysEx byte
-			f.parseSysEx(sysExData[:len(sysExData)-1])
+			f.parseSysEx(data)
 		}
 	}
+}
+
+func parseFirmware(data []byte) string {
+	name := []byte{}
+	for _, val := range data[2:(len(data) - 1)] {
+		if val != 0 {
+			name = append(name, val)
+		}
+	}
+	return string(name[:])
+}
+
+func parseCapabilityResponse(data []byte) []Pin {
+	var (
+		pins           = []Pin{}
+		supportedModes = 0
+		n              = 0
+	)
+
+	for _, val := range data[:(len(data) - 5)] {
+		if val == 127 {
+			modes := []int{}
+			for _, mode := range []int{Input, Output, Analog, Pwm, Servo} {
+				if (supportedModes & (1 << byte(mode))) != 0 {
+					modes = append(modes, mode)
+				}
+			}
+
+			pins = append(pins, Pin{SupportedModes: modes, Mode: Output})
+			supportedModes = 0
+			n = 0
+			continue
+		}
+
+		if n == 0 {
+			supportedModes = supportedModes | (1 << val)
+		}
+		n ^= 1
+	}
+
+	return pins
+}
+
+func mergeAnalogMappingResponse(pins []Pin, data []byte) ([]Pin, []int) {
+	analogPins := []int{}
+	for index, val := range data[:len(pins)-1] {
+		pins[index].AnalogChannel = int(val)
+		if val != 127 {
+			analogPins = append(analogPins, index)
+		}
+	}
+	return pins, analogPins
 }
 
 func (f *Firmata) parseSysEx(data []byte) {
@@ -533,43 +679,6 @@ func (f *Firmata) parseSysEx(data []byte) {
 	f.printSysExData("SysEx Rx", cmd, data)
 
 	switch cmd {
-	case CapabilityResponse:
-		f.pins = []Pin{}
-		supportedModes := 0
-		n := 0
-		for _, val := range data[:(len(data) - 5)] {
-			if val == 127 {
-				modes := []int{}
-				for _, mode := range []int{Input, Output, Analog, Pwm, Servo} {
-					if (supportedModes & (1 << byte(mode))) != 0 {
-						modes = append(modes, mode)
-					}
-				}
-
-				f.pins = append(f.pins, Pin{SupportedModes: modes, Mode: Output})
-				supportedModes = 0
-				n = 0
-				continue
-			}
-
-			if n == 0 {
-				supportedModes = supportedModes | (1 << val)
-			}
-			n ^= 1
-		}
-		log.Debugf("Total pins: %v\n", len(f.pins))
-		f.AnalogMappingQuery()
-	case AnalogMappingResponse:
-		f.analogPins = []int{}
-		for index, val := range data[:len(f.pins)-1] {
-			f.pins[index].AnalogChannel = int(val)
-			if val != 127 {
-				f.analogPins = append(f.analogPins, index)
-			}
-			// fmt.Println(index, ":", f.pins[index].AnalogChannel, ":", val)
-		}
-		log.Debugf("pin -> channel: %v\n", f.analogPins)
-		f.connected = true
 	case PinStateResponse:
 		pin := data[0]
 		f.pins[pin].Mode = int(data[1])
@@ -586,6 +695,7 @@ func (f *Firmata) parseSysEx(data []byte) {
 		default:
 			log.Debugf("PinState%v", pin)
 		}
+
 	case I2CReply:
 		reply := I2cReply{
 			Address:  int(byte(data[0]) | byte(data[1])<<7),
@@ -608,19 +718,11 @@ func (f *Firmata) parseSysEx(data []byte) {
 		default:
 			log.Warnf("Failed to send I2cReply: %v", reply)
 		}
-	case FirmwareQuery:
-		name := []byte{}
-		for _, val := range data[2:(len(data) - 1)] {
-			if val != 0 {
-				name = append(name, val)
-			}
-		}
-		f.FirmwareName = string(name[:])
-		log.Debugf("Firmware: %s", f.FirmwareName)
-		f.CapabilitiesQuery()
+
 	case StringData:
 		str := data[:]
 		log.Debugf("StringData: '%v'", string(str[:len(str)-1]))
+
 	case StepperData:
 		switch StepperCommand(data[0]) {
 		case StepperReportPosition:
@@ -664,13 +766,4 @@ func (f *Firmata) printByteArray(title string, data []uint8) {
 func (f *Firmata) printSysExData(title string, cmd SysExCommand, data []uint8) {
 	log.Debug("")
 	log.Debug(title, "-", cmd)
-	str := ""
-	for index, b := range data {
-		str += fmt.Sprintf("0x%02X ", b)
-		if (index+1)%8 == 0 || index == len(data)-1 {
-			log.Debug(str)
-			str = ""
-		}
-	}
-	log.Debug("")
 }
