@@ -47,7 +47,7 @@ func main() {
 	}
 	log.Infof("Created firmata, configuring stepper...")
 
-	log.Infof("configuring stepper")
+	log.Infof("configuring stepper step:%d dir:%d en:%d", *stepPin, *dirPin, *enPin)
 	err = f.StepperConfigure(devID, gomata.Driver, gomata.WholeStep, gomata.EnablePin, *stepPin, *dirPin, 0, 0, *enPin, 0)
 	if err != nil {
 		log.Fatalf("failed to configure stepper: %s", err)
@@ -67,7 +67,6 @@ func main() {
 		log.Fatalf("failed to set acceleration: %s", err)
 	}
 
-	// NOTE: The motor is enabled by default
 	log.Infof("enabling stepper")
 	err = f.StepperEnable(devID, gomata.Enabled)
 	if err != nil {
@@ -103,10 +102,13 @@ func main() {
 			log.Fatalf("failed to stop motor: %s", err)
 		}
 	case msg := <-f.StepperMoveCompletions():
-		log.Infof("disabling stepper: %+v", msg)
-		err = f.StepperEnable(devID, gomata.NotEnabled)
-		if err != nil {
-			log.Fatalf("failed to set enabled: %s", err)
-		}
+		log.Infof("move complete: %+v", msg)
+		/*
+			log.Infof("disabling stepper: %+v", msg)
+			err = f.StepperEnable(devID, gomata.NotEnabled)
+			if err != nil {
+				log.Fatalf("failed to set enabled: %s", err)
+			}
+		*/
 	}
 }

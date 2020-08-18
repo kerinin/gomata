@@ -97,25 +97,13 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.connection = conn
 
 	err = f.Reset()
-	log.Infof("Waiting 4s for reset...")
-	<-time.After(4 * time.Second)
+	log.Infof("Waiting 1s for reset...")
+	<-time.After(1 * time.Second)
 
 	var (
 		r    = bufio.NewReader(f.connection)
 		data []byte
 	)
-
-	// // Get protocol version
-	// err = f.ProtocolVersionQuery()
-	// if err != nil {
-	// 	return fmt.Errorf("querying protocol version: %w", err)
-	// }
-	// data, err = f.readNext(r, ProtocolVersion)
-	// if err != nil {
-	// 	return fmt.Errorf("getting protocol version: %w", err)
-	// }
-	// f.ProtocolVersion = fmt.Sprintf("%v.%v", data[0], data[1])
-	// log.Infof("Protocol version: %s", f.ProtocolVersion)
 
 	// Get firmware
 	err = f.FirmwareQuery()
@@ -165,7 +153,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 
 // Reset sends the SystemReset sysex code.
 func (f *Firmata) Reset() error {
-	return f.write([]byte{byte(SystemReset)})
+	return f.write([]byte{byte(SystemReset)}, "--> Reset")
 }
 
 // SetPinMode sets the pin to mode.
@@ -198,38 +186,38 @@ func (f *Firmata) ServoConfig(pin int, max int, min int) error {
 		byte(min & 0x7F),
 		byte((min >> 7) & 0x7F),
 	}
-	return f.writeSysex(ret)
+	return f.writeSysex(ret, "--> SysEx ServoConfig")
 }
 
 // AnalogWrite writes value to pin.
 func (f *Firmata) AnalogWrite(pin int, value int) error {
 	f.pins[pin].Value = value
-	return f.write([]byte{byte(AnalogMessage) | byte(pin), byte(value & 0x7F), byte((value >> 7) & 0x7F)})
+	return f.write([]byte{byte(AnalogMessage) | byte(pin), byte(value & 0x7F), byte((value >> 7) & 0x7F)}, "--> Analog Write")
 }
 
 // FirmwareQuery sends the FirmwareQuery sysex code.
 func (f *Firmata) FirmwareQuery() error {
-	return f.writeSysex([]byte{byte(FirmwareQuery)})
+	return f.writeSysex([]byte{byte(FirmwareQuery)}, "--> SysEx FirmwareQuery")
 }
 
 // PinStateQuery sends a PinStateQuery for pin.
 func (f *Firmata) PinStateQuery(pin int) error {
-	return f.writeSysex([]byte{byte(PinStateQuery), byte(pin)})
+	return f.writeSysex([]byte{byte(PinStateQuery), byte(pin)}, "--> SysEx Pin State Query")
 }
 
 // ProtocolVersionQuery sends the ProtocolVersion sysex code.
 func (f *Firmata) ProtocolVersionQuery() error {
-	return f.write([]byte{byte(ProtocolVersion)})
+	return f.write([]byte{byte(ProtocolVersion)}, "--> Protocol Version Query")
 }
 
 // CapabilitiesQuery sends the CapabilityQuery sysex code.
 func (f *Firmata) CapabilitiesQuery() error {
-	return f.writeSysex([]byte{byte(CapabilityQuery)})
+	return f.writeSysex([]byte{byte(CapabilityQuery)}, "--> SysEx Capabilities Query")
 }
 
 // AnalogMappingQuery sends the AnalogMappingQuery sysex code.
 func (f *Firmata) AnalogMappingQuery() error {
-	return f.writeSysex([]byte{byte(AnalogMappingQuery)})
+	return f.writeSysex([]byte{byte(AnalogMappingQuery)}, "--> SysEx Analog Mapping Query")
 }
 
 // ReportDigital enables or disables digital reporting for pin, a non zero
@@ -247,7 +235,7 @@ func (f *Firmata) ReportAnalog(pin int, state int) error {
 // I2cRead reads numBytes from address once.
 func (f *Firmata) I2cRead(address int, numBytes int) error {
 	return f.writeSysex([]byte{byte(I2CRequest), byte(address), (I2CModeRead << 3),
-		byte(numBytes) & 0x7F, (byte(numBytes) >> 7) & 0x7F})
+		byte(numBytes) & 0x7F, (byte(numBytes) >> 7) & 0x7F}, "--> SysEx I2cRead")
 }
 
 // I2cWrite writes data to address.
@@ -257,13 +245,13 @@ func (f *Firmata) I2cWrite(address int, data []byte) error {
 		ret = append(ret, byte(val&0x7F))
 		ret = append(ret, byte((val>>7)&0x7F))
 	}
-	return f.writeSysex(ret)
+	return f.writeSysex(ret, "--> SysEx I2cWrite")
 }
 
 // I2cConfig configures the delay in which a register can be read from after it
 // has been written to.
 func (f *Firmata) I2cConfig(delay int) error {
-	return f.writeSysex([]byte{byte(I2CConfig), byte(delay & 0xFF), byte((delay >> 8) & 0xFF)})
+	return f.writeSysex([]byte{byte(I2CConfig), byte(delay & 0xFF), byte((delay >> 8) & 0xFF)}, "--> SysEx I2cConfig")
 }
 
 func (f *Firmata) StepperConfigure(devID int, wireCount WireCount, stepType StepType, hasEnable HasEnablePin, pin1 int, pin2 int, pin3 int, pin4 int, enablePin int, invert Inversions) error {
@@ -278,7 +266,7 @@ func (f *Firmata) StepperConfigure(devID int, wireCount WireCount, stepType Step
 		byte(pin4),
 		byte(enablePin),
 		// byte(invert),
-	})
+	}, "--> SysEx Stepper Configure")
 }
 
 // StepperZero zeros the stepper.
@@ -286,20 +274,20 @@ func (f *Firmata) StepperConfigure(devID int, wireCount WireCount, stepType Step
 // (in steps). Sending the zero command will reset the position value to zero
 // without moving the stepper.
 func (f *Firmata) StepperZero(devID int) error {
-	return f.writeSysex([]byte{0x62, 0x01, byte(devID)})
+	return f.writeSysex([]byte{0x62, 0x01, byte(devID)}, "--> SysEx Stepper Zero")
 }
 
 // StepperStep (relative mode)
 // Steps to move is specified as a 32-bit signed long.
 func (f *Firmata) StepperStep(devID int, v int32) error {
-	return f.writeSysex(append([]byte{0x62, 0x02, byte(devID)}, integerBytes(v)...))
+	return f.writeSysex(append([]byte{0x62, 0x02, byte(devID)}, integerBytes(v)...), "--> SysEx Stepper Step")
 }
 
 // StepperTo (absolute move)
 // Moves a stepper to a desired position based on the number of steps from the
 // zero position. Position is specified as a 32-bit signed long.
 func (f *Firmata) StepperTo(devID int, v int32) error {
-	return f.writeSysex(append([]byte{0x62, 0x03, byte(devID)}, integerBytes(v)...))
+	return f.writeSysex(append([]byte{0x62, 0x03, byte(devID)}, integerBytes(v)...), "--> SysEx Stepper To")
 }
 
 // StepperEnable sets the enable pin to the given value
@@ -308,7 +296,7 @@ func (f *Firmata) StepperTo(devID int, v int32) error {
 // motor. When a stepper motor is idle, voltage is still being consumed so if
 // the stepper motor does not need to hold its position use enable to save power.
 func (f *Firmata) StepperEnable(devID int, high IsEnabled) error {
-	return f.writeSysex([]byte{0x62, 0x04, byte(devID), byte(high)})
+	return f.writeSysex([]byte{0x62, 0x04, byte(devID), byte(high)}, "--> SysEx Stepper Enable")
 }
 
 // StepperStop stops the motor
@@ -316,19 +304,19 @@ func (f *Firmata) StepperEnable(devID int, high IsEnabled) error {
 // client with the position of the motor when stop is completed note: If an
 // acceleration is set, stop will not be immediate.
 func (f *Firmata) StepperStop(devID int) error {
-	return f.writeSysex([]byte{0x62, 0x05, byte(devID)})
+	return f.writeSysex([]byte{0x62, 0x05, byte(devID)}, "--> SysEx Stepper Stop")
 }
 
 // StepperReport requests a position report
 func (f *Firmata) StepperReport(devID int) error {
-	return f.writeSysex([]byte{0x62, 0x06, byte(devID)})
+	return f.writeSysex([]byte{0x62, 0x06, byte(devID)}, "--> SysEx Stepper Report")
 }
 
 // StepperSetAcceleration sets the stepper's acceleration
 // Sets the acceleration/deceleration in steps/sec^2. The accel value is passed
 // using accelStepperFirmata's custom float format
 func (f *Firmata) StepperSetAcceleration(devID int, v float32) error {
-	return f.writeSysex(append([]byte{0x62, 0x08, byte(devID)}, floatBytes(v)...))
+	return f.writeSysex(append([]byte{0x62, 0x08, byte(devID)}, floatBytes(v)...), "--> SysEx Stepper Set Acceleration")
 }
 
 // StepperSetSpeed sets the stepper's (max) speed
@@ -336,7 +324,7 @@ func (f *Firmata) StepperSetAcceleration(devID int, v float32) error {
 // If acceleration is on (non-zero) sets the maximum speed in steps per second.
 // The speed value is passed using accelStepperFirmata's custom float format.
 func (f *Firmata) StepperSetSpeed(devID int, v float32) error {
-	return f.writeSysex(append([]byte{0x62, 0x09, byte(devID)}, floatBytes(v)...))
+	return f.writeSysex(append([]byte{0x62, 0x09, byte(devID)}, floatBytes(v)...), "--> SysEx Stepper Set Speed")
 }
 
 func (f *Firmata) PinStates() <-chan Pin {
@@ -444,7 +432,7 @@ func (f *Firmata) togglePinReporting(pin int, state int, mode byte) error {
 		state = 0
 	}
 
-	if err := f.write([]byte{byte(mode) | byte(pin), byte(state)}); err != nil {
+	if err := f.write([]byte{byte(mode) | byte(pin), byte(state)}, "--> Toggle Pin Reporting"); err != nil {
 		return err
 	}
 
@@ -452,20 +440,19 @@ func (f *Firmata) togglePinReporting(pin int, state int, mode byte) error {
 
 }
 
-func (f *Firmata) writeSysex(data []byte) (err error) {
+func (f *Firmata) writeSysex(data []byte, title string, args ...interface{}) (err error) {
 	frame := append([]byte{byte(StartSysex)}, append(data, byte(EndSysex))...)
-	f.printSysExData("SysEx Tx", SysExCommand(frame[1]), frame)
-	return f.write(frame)
+	return f.write(frame, title, args...)
 }
 
-func (f *Firmata) write(data []byte) (err error) {
-	f.printByteArray("Data write", data)
+func (f *Firmata) write(data []byte, title string, args ...interface{}) (err error) {
+	f.printByteArray(data, title, args...)
 	_, err = f.connection.Write(data[:])
 	return err
 }
 
 func (f *Firmata) sendCommand(cmd []byte) error {
-	f.printByteArray("Command send", cmd)
+	f.printByteArray(cmd, "Command send")
 	_, err := f.connection.Write(cmd)
 	return err
 }
@@ -494,10 +481,7 @@ func (f *Firmata) readNext(r *bufio.Reader, searchCmd FirmataCommand) ([]byte, e
 		if err != nil {
 			return nil, fmt.Errorf("reading command: %w", err)
 		}
-		if cmd != searchCmd {
-			log.Infof("ignoring command %s, waiting for %s", cmd, searchCmd)
-			continue
-		}
+		log.Infof("ignoring command %s, waiting for %s", cmd, searchCmd)
 		return data, nil
 	}
 }
@@ -515,7 +499,14 @@ func (f *Firmata) readNextSysEx(r *bufio.Reader, searchCmd SysExCommand) ([]byte
 
 		sysExCommand := SysExCommand(data[0])
 		if sysExCommand != searchCmd {
-			log.Infof("ignoring sysex command %s != %s", sysExCommand, searchCmd)
+			switch sysExCommand {
+			case StringData:
+				str := data[1:]
+				log.Warnf("ignoring StringData (waiting for %s): '%v'", searchCmd, string(str[:len(str)-1]))
+
+			default:
+				log.Infof("ignoring sysex command %s != %s", sysExCommand, searchCmd)
+			}
 			continue
 		}
 
@@ -536,7 +527,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 		if err != nil {
 			return 0, nil, err
 		}
-		f.printByteArray("Read Protocol Version:", buf)
+		f.printByteArray(buf, "<-- Protocol Version:")
 		return ProtocolVersion, buf, nil
 
 	case AnalogMessageRangeStart <= cmd && AnalogMessageRangeEnd >= cmd:
@@ -544,7 +535,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 		if err != nil {
 			return 0, nil, err
 		}
-		f.printByteArray("Read Analog Message:", buf)
+		f.printByteArray(buf, "<-- Analog Message:")
 		return AnalogMessage, buf, nil
 
 	case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
@@ -552,7 +543,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 		if err != nil {
 			return 0, nil, err
 		}
-		f.printByteArray("Read Digital Message:", buf)
+		f.printByteArray(buf, "<-- Digital Message:")
 		return DigitalMessage, buf, nil
 
 	case StartSysex == cmd:
@@ -561,7 +552,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 			return 0, nil, err
 		}
 
-		f.printByteArray("Read SysEx:", buf)
+		f.printByteArray(buf, "<-- SysEx:")
 		return StartSysex, buf, nil
 
 	default:
@@ -676,7 +667,7 @@ func (f *Firmata) parseSysEx(data []byte) {
 
 	cmd := SysExCommand(data[0])
 	data = data[1:]
-	f.printSysExData("SysEx Rx", cmd, data)
+	f.printByteArray(data, "Parsed SysEx %s", cmd)
 
 	switch cmd {
 	case PinStateResponse:
@@ -730,6 +721,7 @@ func (f *Firmata) parseSysEx(data []byte) {
 				DeviceID: int32(byte(data[1])),
 				Position: integerFromBytes(data[2], data[3], data[4], data[5], data[6]),
 			}
+			log.Debugf("Stepper reported position %+v", reply)
 			select {
 			case f.stepperReports <- reply:
 			default:
@@ -740,18 +732,21 @@ func (f *Firmata) parseSysEx(data []byte) {
 				DeviceID: int32(byte(data[1])),
 				Position: integerFromBytes(data[2], data[3], data[4], data[5], data[6]),
 			}
+			log.Debugf("Stepper reported move complete %+v", reply)
 			select {
 			case f.stepperMoveCompletions <- reply:
 			default:
 				log.Warnf("Failed to send StepperMoveComplete: %+v", reply)
 			}
 		}
+
+	default:
+		log.Warnf("Unhandled SysEx")
 	}
 }
 
-func (f *Firmata) printByteArray(title string, data []uint8) {
-	log.Debug("")
-	log.Debug(title)
+func (f *Firmata) printByteArray(data []uint8, title string, args ...interface{}) {
+	log.Debugf(title, args...)
 	str := ""
 	for index, b := range data {
 		str += fmt.Sprintf("0x%02X ", b)
@@ -760,10 +755,4 @@ func (f *Firmata) printByteArray(title string, data []uint8) {
 			str = ""
 		}
 	}
-	log.Debug("")
-}
-
-func (f *Firmata) printSysExData(title string, cmd SysExCommand, data []uint8) {
-	log.Debug("")
-	log.Debug(title, "-", cmd)
 }
