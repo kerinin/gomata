@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -29,6 +30,8 @@ type Firmata struct {
 	i2cReplies             chan I2cReply
 	stepperReports         chan StepperPosition
 	stepperMoveCompletions chan StepperPosition
+	waits                  map[int32]chan StepperPosition
+	waitsMx                *sync.Mutex
 }
 
 // Pin represents a pin on the firmata board
@@ -65,6 +68,8 @@ func New() *Firmata {
 		i2cReplies:             make(chan I2cReply),
 		stepperReports:         make(chan StepperPosition),
 		stepperMoveCompletions: make(chan StepperPosition),
+		waits:                  make(map[int32]chan StepperPosition),
+		waitsMx:                &sync.Mutex{},
 	}
 
 	return c
@@ -341,6 +346,15 @@ func (f *Firmata) StepperReports() <-chan StepperPosition {
 
 func (f *Firmata) StepperMoveCompletions() <-chan StepperPosition {
 	return f.stepperMoveCompletions
+}
+
+func (f *Firmata) AwaitStepperMoveCompletion(deviceID int32) <-chan StepperPosition {
+	f.waitsMx.Lock()
+	defer f.waitsMx.Unlock()
+
+	ch := make(chan StepperPosition, 0)
+	f.waits[deviceID] = ch
+	return ch
 }
 
 func integerFromBytes(arg1, arg2, arg3, arg4, arg5 byte) int32 {
@@ -733,10 +747,16 @@ func (f *Firmata) parseSysEx(data []byte) {
 				Position: integerFromBytes(data[2], data[3], data[4], data[5], data[6]),
 			}
 			log.Debugf("Stepper reported move complete %+v", reply)
-			select {
-			case f.stepperMoveCompletions <- reply:
-			default:
-				log.Warnf("Failed to send StepperMoveComplete: %+v", reply)
+
+			if ch, found := f.waits[reply.DeviceID]; found {
+				ch <- reply
+				delete(f.waits, reply.DeviceID)
+			} else {
+				select {
+				case f.stepperMoveCompletions <- reply:
+				default:
+					log.Warnf("Failed to send StepperMoveComplete: %+v", reply)
+				}
 			}
 		}
 
