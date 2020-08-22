@@ -30,7 +30,8 @@ type Firmata struct {
 	i2cReplies             chan I2cReply
 	stepperReports         chan StepperPosition
 	stepperMoveCompletions chan StepperPosition
-	waits                  map[int32]chan StepperPosition
+	reportWaits            map[int32]chan StepperPosition
+	completionWaits        map[int32]chan StepperPosition
 	waitsMx                *sync.Mutex
 }
 
@@ -68,7 +69,8 @@ func New() *Firmata {
 		i2cReplies:             make(chan I2cReply),
 		stepperReports:         make(chan StepperPosition),
 		stepperMoveCompletions: make(chan StepperPosition),
-		waits:                  make(map[int32]chan StepperPosition),
+		reportWaits:            make(map[int32]chan StepperPosition),
+		completionWaits:        make(map[int32]chan StepperPosition),
 		waitsMx:                &sync.Mutex{},
 	}
 
@@ -348,12 +350,21 @@ func (f *Firmata) StepperMoveCompletions() <-chan StepperPosition {
 	return f.stepperMoveCompletions
 }
 
+func (f *Firmata) AwaitStepperReport(deviceID int32) <-chan StepperPosition {
+	f.waitsMx.Lock()
+	defer f.waitsMx.Unlock()
+
+	ch := make(chan StepperPosition, 0)
+	f.reportWaits[deviceID] = ch
+	return ch
+}
+
 func (f *Firmata) AwaitStepperMoveCompletion(deviceID int32) <-chan StepperPosition {
 	f.waitsMx.Lock()
 	defer f.waitsMx.Unlock()
 
 	ch := make(chan StepperPosition, 0)
-	f.waits[deviceID] = ch
+	f.completionWaits[deviceID] = ch
 	return ch
 }
 
@@ -736,10 +747,16 @@ func (f *Firmata) parseSysEx(data []byte) {
 				Position: integerFromBytes(data[2], data[3], data[4], data[5], data[6]),
 			}
 			log.Debugf("Stepper reported position %+v", reply)
-			select {
-			case f.stepperReports <- reply:
-			default:
-				log.Warnf("Failed to send StepperPosition: %+v", reply)
+
+			if ch, found := f.reportWaits[reply.DeviceID]; found {
+				ch <- reply
+				delete(f.reportWaits, reply.DeviceID)
+			} else {
+				select {
+				case f.stepperReports <- reply:
+				default:
+					log.Warnf("Failed to send StepperPosition: %+v", reply)
+				}
 			}
 		case StepperMoveComplete:
 			reply := StepperPosition{
@@ -748,9 +765,9 @@ func (f *Firmata) parseSysEx(data []byte) {
 			}
 			log.Debugf("Stepper reported move complete %+v", reply)
 
-			if ch, found := f.waits[reply.DeviceID]; found {
+			if ch, found := f.completionWaits[reply.DeviceID]; found {
 				ch <- reply
-				delete(f.waits, reply.DeviceID)
+				delete(f.completionWaits, reply.DeviceID)
 			} else {
 				select {
 				case f.stepperMoveCompletions <- reply:
