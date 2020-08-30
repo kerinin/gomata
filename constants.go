@@ -14,11 +14,17 @@ type IsEnabled byte
 
 // Pin Modes
 const (
-	Input  = 0x00
-	Output = 0x01
-	Analog = 0x02
-	Pwm    = 0x03
-	Servo  = 0x04
+	InputPin   = 0x00
+	OutputPin  = 0x01
+	AnalogPin  = 0x02
+	PwmPin     = 0x03
+	ServoPin   = 0x04
+	I2CPin     = 0x06
+	OneWirePin = 0x07
+	StepperPin = 0x08
+	EncoderPin = 0x09
+	SerialPin  = 0x0a
+	PullupPin  = 0x0b
 
 	// SPIConfig SPISubCommand = 0x10
 	// SPIComm   SPISubCommand = 0x20
