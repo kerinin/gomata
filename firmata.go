@@ -581,7 +581,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 		return StartSysex, buf, nil
 
 	default:
-		return 0, nil, fmt.Errorf("Unhandled command %s", cmd)
+		return cmd, nil, nil
 	}
 }
 
@@ -589,7 +589,11 @@ func (f *Firmata) process(r *bufio.Reader) {
 	for {
 		cmd, data, err := f.readCommand(r)
 		if err != nil {
-			log.Panic("Reading command %s: %s", cmd, err)
+			log.Panicf("Reading command %s: %s", cmd, err)
+		}
+		if data == nil {
+			log.Warnf("Read command %x with empty data")
+			continue
 		}
 
 		switch {
