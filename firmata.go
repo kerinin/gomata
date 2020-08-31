@@ -230,12 +230,27 @@ func (f *Firmata) AnalogMappingQuery() error {
 // ReportDigital enables or disables digital reporting for pin, a non zero
 // state enables reporting
 func (f *Firmata) ReportDigital(pin int, state int) error {
-	return f.togglePinReporting(pin, state, byte(ReportDigital), "--> Report Digital")
+	// A "port" identifies 8 pins:
+	// * Port 0 is digital pins 0-7
+	// * Port 1 is digital pins 8-15
+	// * ...etc
+	port := pin / 8
+	return f.togglePinReporting(port, state, byte(ReportDigital), "--> Report Digital")
 }
 
 // ReportAnalog enables or disables analog reporting for pin, a non zero
 // state enables reporting
+// The given pin refers to the offset of the requested pin in the Pins slice.
 func (f *Firmata) ReportAnalog(pin int, state int) error {
+	if pin < 0 || len(f.pins) <= pin {
+		return fmt.Errorf("pin %d is not a valid pin", pin)
+	}
+
+	analogPin := f.pins[pin].AnalogChannel
+	if analogPin == 127 {
+		return fmt.Errorf("pin %d is does not have analog reporting capabilities", pin)
+	}
+
 	return f.togglePinReporting(pin, state, byte(ReportAnalog), "--> Report Analog")
 }
 
@@ -454,14 +469,14 @@ func floatBytes(input float32) []byte {
 	}
 }
 
-func (f *Firmata) togglePinReporting(pin int, state int, mode byte, title string, args ...interface{}) error {
+func (f *Firmata) togglePinReporting(pinOrPort int, state int, mode byte, title string, args ...interface{}) error {
 	if state != 0 {
 		state = 1
 	} else {
 		state = 0
 	}
 
-	if err := f.write([]byte{byte(mode) | byte(pin), byte(state)}, title, args...); err != nil {
+	if err := f.write([]byte{byte(mode) | byte(pinOrPort), byte(state)}, title, args...); err != nil {
 		return err
 	}
 
@@ -565,7 +580,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 			return 0, nil, err
 		}
 		f.printByteArray(buf, "<-- Analog Message (0x%02X):", byte(cmd))
-		return AnalogMessage, buf, nil
+		return cmd, buf, nil
 
 	case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
 		buf, err := f.read(r, 2)
@@ -573,7 +588,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 			return 0, nil, err
 		}
 		f.printByteArray(buf, "<-- Digital Message (0x%02X):", byte(cmd))
-		return DigitalMessage, buf, nil
+		return cmd, buf, nil
 
 	case StartSysex == cmd:
 		buf, err := r.ReadSlice(byte(EndSysex))
