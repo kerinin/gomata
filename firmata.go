@@ -166,7 +166,7 @@ func (f *Firmata) Reset() error {
 // SetPinMode sets the pin to mode.
 func (f *Firmata) SetPinMode(pin int, mode int) error {
 	f.pins[byte(pin)].Mode = mode
-	return f.sendCommand([]byte{byte(PinMode), byte(pin), byte(mode)})
+	return f.sendCommand([]byte{byte(PinMode), byte(pin), byte(mode)}, "--> SetPinMode")
 }
 
 // DigitalWrite writes value to pin.
@@ -180,7 +180,7 @@ func (f *Firmata) DigitalWrite(pin int, value int) error {
 			portValue = portValue | (1 << i)
 		}
 	}
-	return f.sendCommand([]byte{byte(DigitalMessage) | port, portValue & 0x7F, (portValue >> 7) & 0x7F})
+	return f.sendCommand([]byte{byte(DigitalMessage) | port, portValue & 0x7F, (portValue >> 7) & 0x7F}, "--> DigitalWrite")
 }
 
 // ServoConfig sets the min and max pulse width for servo PWM range
@@ -230,13 +230,17 @@ func (f *Firmata) AnalogMappingQuery() error {
 // ReportDigital enables or disables digital reporting for pin, a non zero
 // state enables reporting
 func (f *Firmata) ReportDigital(pin int, state int) error {
-	return f.togglePinReporting(pin, state, byte(ReportDigital))
+	return f.togglePinReporting(pin, state, byte(ReportDigital), "--> Report Digital")
 }
 
 // ReportAnalog enables or disables analog reporting for pin, a non zero
 // state enables reporting
 func (f *Firmata) ReportAnalog(pin int, state int) error {
-	return f.togglePinReporting(pin, state, byte(ReportAnalog))
+	return f.togglePinReporting(pin, state, byte(ReportAnalog), "--> Report Analog")
+}
+
+func (f *Firmata) SamplingInterval(intervalMs int) error {
+	return f.writeSysex([]byte{byte(SamplingInterval), byte(intervalMs), byte(intervalMs >> 8)}, "--> SysEx Set Sampling Interval")
 }
 
 // I2cRead reads numBytes from address once.
@@ -450,14 +454,14 @@ func floatBytes(input float32) []byte {
 	}
 }
 
-func (f *Firmata) togglePinReporting(pin int, state int, mode byte) error {
+func (f *Firmata) togglePinReporting(pin int, state int, mode byte, title string, args ...interface{}) error {
 	if state != 0 {
 		state = 1
 	} else {
 		state = 0
 	}
 
-	if err := f.write([]byte{byte(mode) | byte(pin), byte(state)}, "--> Toggle Pin Reporting"); err != nil {
+	if err := f.write([]byte{byte(mode) | byte(pin), byte(state)}, title, args...); err != nil {
 		return err
 	}
 
@@ -476,17 +480,17 @@ func (f *Firmata) write(data []byte, title string, args ...interface{}) (err err
 	return err
 }
 
-func (f *Firmata) sendCommand(cmd []byte) error {
-	f.printByteArray(cmd, "Command send")
+func (f *Firmata) sendCommand(cmd []byte, title string, args ...interface{}) error {
+	f.printByteArray(cmd, title, args...)
 	_, err := f.connection.Write(cmd)
 	return err
 }
 
-func (f *Firmata) read(length int) (buf []byte, err error) {
+func (f *Firmata) read(r *bufio.Reader, length int) (buf []byte, err error) {
 	i := 0
 	for length > 0 {
 		tmp := make([]byte, length)
-		if i, err = f.connection.Read(tmp); err != nil {
+		if i, err = r.Read(tmp); err != nil {
 			if err.Error() != "EOF" {
 				return
 			}
@@ -548,7 +552,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 
 	switch {
 	case ProtocolVersion == cmd:
-		buf, err := f.read(2)
+		buf, err := f.read(r, 2)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -556,19 +560,19 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 		return ProtocolVersion, buf, nil
 
 	case AnalogMessageRangeStart <= cmd && AnalogMessageRangeEnd >= cmd:
-		buf, err := f.read(2)
+		buf, err := f.read(r, 2)
 		if err != nil {
 			return 0, nil, err
 		}
-		f.printByteArray(buf, "<-- Analog Message:")
+		f.printByteArray(buf, "<-- Analog Message (0x%02X):", byte(cmd))
 		return AnalogMessage, buf, nil
 
 	case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
-		buf, err := f.read(2)
+		buf, err := f.read(r, 2)
 		if err != nil {
 			return 0, nil, err
 		}
-		f.printByteArray(buf, "<-- Digital Message:")
+		f.printByteArray(buf, "<-- Digital Message (0x%02X):", byte(cmd))
 		return DigitalMessage, buf, nil
 
 	case StartSysex == cmd:
@@ -591,21 +595,11 @@ func (f *Firmata) process(r *bufio.Reader) {
 		if err != nil {
 			log.Panicf("Reading command %s: %s", cmd, err)
 		}
-		if data == nil {
-			log.Warnf("Read command %x with empty data")
-			continue
-		}
 
 		switch {
 		case AnalogMessageRangeStart <= cmd && AnalogMessageRangeEnd >= cmd:
-			buf, err := f.read(2)
-			if err != nil {
-				log.Panic(err)
-				return
-			}
-
-			value := uint(buf[0]) | uint(buf[1])<<7
 			pin := int((cmd & 0x0F))
+			value := uint(data[0]) | uint(data[1])<<7
 
 			if len(f.analogPins) > pin {
 				if len(f.pins) > f.analogPins[pin] {
@@ -615,18 +609,14 @@ func (f *Firmata) process(r *bufio.Reader) {
 			}
 
 		case DigitalMessageRangeStart <= cmd && DigitalMessageRangeEnd >= cmd:
-			buf, err := f.read(2)
-			if err != nil {
-				log.Panic(err)
-				return
-			}
 			port := cmd & 0x0F
-			portValue := buf[1] | (buf[2] << 7)
+			portValue := data[0] | (data[1] << 7)
+
 			for i := 0; i < 8; i++ {
 				pinNumber := int((8*byte(port) + byte(i)))
 				if len(f.pins) > pinNumber {
-					if f.pins[pinNumber].Mode == Input {
-						f.pins[pinNumber].Value = int((portValue >> (byte(i) & 0x07)) & 0x01)
+					if f.pins[pinNumber].Mode == InputPin || f.pins[pinNumber].Mode == PullupPin {
+						f.pins[pinNumber].Value = int((portValue >> (byte(i) & 0x7F)) & 0x01)
 						log.Debugf("DigitalRead %v: %d", pinNumber, f.pins[pinNumber].Value)
 					}
 				}
@@ -634,6 +624,9 @@ func (f *Firmata) process(r *bufio.Reader) {
 
 		case StartSysex == cmd:
 			f.parseSysEx(data)
+
+		default:
+			log.Warnf("Read unexpected command 0x%02X", byte(cmd))
 		}
 	}
 }
@@ -658,13 +651,13 @@ func parseCapabilityResponse(data []byte) []Pin {
 	for _, val := range data[:(len(data) - 5)] {
 		if val == 127 {
 			modes := []int{}
-			for _, mode := range []int{Input, Output, Analog, Pwm, Servo} {
+			for _, mode := range []int{InputPin, OutputPin, AnalogPin, PwmPin, ServoPin, I2CPin, OneWirePin, StepperPin, EncoderPin, SerialPin, PullupPin} {
 				if (supportedModes & (1 << byte(mode))) != 0 {
 					modes = append(modes, mode)
 				}
 			}
 
-			pins = append(pins, Pin{SupportedModes: modes, Mode: Output})
+			pins = append(pins, Pin{SupportedModes: modes, Mode: OutputPin})
 			supportedModes = 0
 			n = 0
 			continue
@@ -691,9 +684,6 @@ func mergeAnalogMappingResponse(pins []Pin, data []byte) ([]Pin, []int) {
 }
 
 func (f *Firmata) parseSysEx(data []byte) {
-
-	// ino.printSysExData("SysEx Rx", cmd, data)
-
 	cmd := SysExCommand(data[0])
 	data = data[1:]
 	f.printByteArray(data, "Parsed SysEx %s", cmd)
