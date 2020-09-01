@@ -373,7 +373,7 @@ func (f *Firmata) AwaitStepperReport(deviceID int32) <-chan StepperPosition {
 	f.waitsMx.Lock()
 	defer f.waitsMx.Unlock()
 
-	ch := make(chan StepperPosition, 0)
+	ch := make(chan StepperPosition, 1)
 	f.reportWaits[deviceID] = ch
 	return ch
 }
@@ -382,7 +382,7 @@ func (f *Firmata) AwaitStepperMoveCompletion(deviceID int32) <-chan StepperPosit
 	f.waitsMx.Lock()
 	defer f.waitsMx.Unlock()
 
-	ch := make(chan StepperPosition, 0)
+	ch := make(chan StepperPosition, 1)
 	f.completionWaits[deviceID] = ch
 	return ch
 }
