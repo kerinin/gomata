@@ -608,7 +608,7 @@ func (f *Firmata) process(r *bufio.Reader) {
 	for {
 		cmd, data, err := f.readCommand(r)
 		if err != nil {
-			log.Panicf("Reading command %s: %s", cmd, err)
+			log.Errorf("Reading command %s: %s", cmd, err)
 		}
 
 		switch {
