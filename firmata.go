@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -606,7 +607,15 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 
 func (f *Firmata) process(r *bufio.Reader) {
 	for {
+		if f.connected == false {
+			return
+		}
 		cmd, data, err := f.readCommand(r)
+		if errors.Is(err, os.ErrClosed) {
+			log.Errorf("Attempted to read closed file: %s", err)
+			f.connected = false
+			return
+		}
 		if err != nil {
 			log.Errorf("Reading command %s: %s", cmd, err)
 		}
