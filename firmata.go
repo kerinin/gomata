@@ -103,15 +103,14 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	}
 
 	f.connection = conn
-
-	err = f.Reset()
-	log.Infof("Waiting 1s for reset...")
-	<-time.After(1 * time.Second)
-
 	var (
 		r    = bufio.NewReader(f.connection)
 		data []byte
 	)
+
+	err = f.Reset()
+	log.Infof("Waiting 1s for reset...")
+	<-time.After(1 * time.Second)
 
 	// Get firmware
 	err = f.FirmwareQuery()
@@ -518,17 +517,6 @@ func (f *Firmata) read(r *bufio.Reader, length int) (buf []byte, err error) {
 		}
 	}
 	return
-}
-
-func (f *Firmata) readNext(r *bufio.Reader, searchCmd FirmataCommand) ([]byte, error) {
-	for {
-		cmd, data, err := f.readCommand(r)
-		if err != nil {
-			return nil, fmt.Errorf("reading command: %w", err)
-		}
-		log.Infof("ignoring command %s, waiting for %s", cmd, searchCmd)
-		return data, nil
-	}
 }
 
 func (f *Firmata) readNextSysEx(r *bufio.Reader, searchCmd SysExCommand) ([]byte, error) {
