@@ -151,6 +151,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	log.Infof("Analog Pins: %v", f.analogPins)
 
 	// Start threads
+	f.connected = true
 	go f.process(r)
 
 	// Firmata creation successful
