@@ -132,7 +132,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	<-time.After(1 * time.Second)
 
 	// Get firmware
-	err = f.FirmwareQuery()
+	err = f.firmwareQuery()
 	if err != nil {
 		return fmt.Errorf("querying firmware: %w", err)
 	}
@@ -144,7 +144,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	log.Infof("Firmware: %s", f.FirmwareName)
 
 	// Get capabilities
-	err = f.CapabilitiesQuery()
+	err = f.capabilitiesQuery()
 	if err != nil {
 		return fmt.Errorf("querying capabilities: %w", err)
 	}
@@ -157,7 +157,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.mx.Unlock()
 
 	// Get analog pins
-	err = f.AnalogMappingQuery()
+	err = f.analogMappingQuery()
 	if err != nil {
 		return fmt.Errorf("querying analog mapping: %w", err)
 	}
@@ -264,14 +264,7 @@ func (f *Firmata) AnalogWrite(pin int, value int) error {
 }
 
 // FirmwareQuery sends the FirmwareQuery sysex code.
-func (f *Firmata) FirmwareQuery() error {
-	f.mx.RLock()
-	defer f.mx.RUnlock()
-
-	if !f.connected {
-		return fmt.Errorf("Not connected")
-	}
-
+func (f *Firmata) firmwareQuery() error {
 	return f.writeSysex([]byte{byte(FirmwareQuery)}, "--> SysEx FirmwareQuery")
 }
 
@@ -300,26 +293,12 @@ func (f *Firmata) ProtocolVersionQuery() error {
 }
 
 // CapabilitiesQuery sends the CapabilityQuery sysex code.
-func (f *Firmata) CapabilitiesQuery() error {
-	f.mx.RLock()
-	defer f.mx.RUnlock()
-
-	if !f.connected {
-		return fmt.Errorf("Not connected")
-	}
-
+func (f *Firmata) capabilitiesQuery() error {
 	return f.writeSysex([]byte{byte(CapabilityQuery)}, "--> SysEx Capabilities Query")
 }
 
 // AnalogMappingQuery sends the AnalogMappingQuery sysex code.
-func (f *Firmata) AnalogMappingQuery() error {
-	f.mx.RLock()
-	defer f.mx.RUnlock()
-
-	if !f.connected {
-		return fmt.Errorf("Not connected")
-	}
-
+func (f *Firmata) analogMappingQuery() error {
 	return f.writeSysex([]byte{byte(AnalogMappingQuery)}, "--> SysEx Analog Mapping Query")
 }
 
