@@ -88,6 +88,9 @@ func (f *Firmata) Disconnect() (err error) {
 	f.err = ErrNotConnected
 	err = f.connection.Close()
 	f.mx.Unlock()
+	if err != nil {
+		log.Warnf("Failed to close connection: %s", err)
+	}
 
 	f.wg.Wait()
 	return err
