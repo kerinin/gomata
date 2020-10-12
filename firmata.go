@@ -22,20 +22,22 @@ type Firmata struct {
 	pins                   []Pin
 	FirmwareName           string
 	ProtocolVersion        string
-	connected              bool
-	connection             io.ReadWriteCloser
-	analogPins             []int
-	ready                  bool
-	analogMappingDone      bool
-	capabilityDone         bool
-	pinStates              chan Pin
 	i2cReplies             chan I2cReply
 	stepperReports         chan StepperPosition
 	stepperMoveCompletions chan StepperPosition
-	reportWaits            map[int32]chan StepperPosition
-	completionWaits        map[int32]chan StepperPosition
-	mx                     *sync.Mutex
-	wg                     *sync.WaitGroup
+
+	// Mutex covers the following fields
+	mx                *sync.RWMutex
+	connected         bool
+	connection        io.ReadWriteCloser
+	analogPins        []int
+	ready             bool
+	analogMappingDone bool
+	capabilityDone    bool
+	pinStates         chan Pin
+	reportWaits       map[int32]chan StepperPosition
+	completionWaits   map[int32]chan StepperPosition
+	wg                *sync.WaitGroup
 }
 
 // Pin represents a pin on the firmata board
@@ -74,7 +76,7 @@ func New() *Firmata {
 		stepperMoveCompletions: make(chan StepperPosition),
 		reportWaits:            make(map[int32]chan StepperPosition),
 		completionWaits:        make(map[int32]chan StepperPosition),
-		mx:                     &sync.Mutex{},
+		mx:                     &sync.RWMutex{},
 	}
 
 	return c
@@ -92,16 +94,16 @@ func (f *Firmata) Disconnect() (err error) {
 
 // Connected returns the current connection state of the Firmata
 func (f *Firmata) Connected() bool {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	return f.connected
 }
 
 // Pins returns all available pins
 func (f *Firmata) Pins() []Pin {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	return f.pins
 }
@@ -110,14 +112,14 @@ func (f *Firmata) Pins() []Pin {
 // then continuously polls the firmata board for new information when it's
 // available.
 func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
-	f.mx.Lock()
-	defer f.mx.Unlock()
-
 	if f.connected {
 		return ErrConnected
 	}
 
+	f.mx.Lock()
 	f.connection = conn
+	f.mx.Unlock()
+
 	var (
 		buf  = ringbuffer.New(1024)
 		tee  = io.TeeReader(conn, buf)
@@ -150,7 +152,9 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	if err != nil {
 		return fmt.Errorf("getting capabilities: %w", err)
 	}
+	f.mx.Lock()
 	f.pins = parseCapabilityResponse(data)
+	f.mx.Unlock()
 
 	// Get analog pins
 	err = f.AnalogMappingQuery()
@@ -161,6 +165,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	if err != nil {
 		return fmt.Errorf("getting analog mapping: %w", err)
 	}
+	f.mx.Lock()
 	f.pins, f.analogPins = mergeAnalogMappingResponse(f.pins, data)
 	for i, pin := range f.pins {
 		log.Infof("Pin %d: %+v", i, pin)
@@ -171,17 +176,18 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.connected = true
 	f.wg = &sync.WaitGroup{}
 	f.wg.Add(1)
-	go f.process(r, buf, f.wg)
+	f.mx.Unlock()
 
 	// Firmata creation successful
+	go f.process(r, buf, f.wg)
 	log.Info("Firmata ready to use")
 	return nil
 }
 
 // Reset sends the SystemReset sysex code.
 func (f *Firmata) Reset() error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Cannot reset when not connected")
@@ -192,8 +198,8 @@ func (f *Firmata) Reset() error {
 
 // SetPinMode sets the pin to mode.
 func (f *Firmata) SetPinMode(pin int, mode int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Cannot set pin mode when not connected")
@@ -205,8 +211,8 @@ func (f *Firmata) SetPinMode(pin int, mode int) error {
 
 // DigitalWrite writes value to pin.
 func (f *Firmata) DigitalWrite(pin int, value int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Cannot write digital value when not connected")
@@ -226,8 +232,8 @@ func (f *Firmata) DigitalWrite(pin int, value int) error {
 
 // ServoConfig sets the min and max pulse width for servo PWM range
 func (f *Firmata) ServoConfig(pin int, max int, min int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Cannot set servo config when not connected")
@@ -246,8 +252,8 @@ func (f *Firmata) ServoConfig(pin int, max int, min int) error {
 
 // AnalogWrite writes value to pin.
 func (f *Firmata) AnalogWrite(pin int, value int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Cannot write analog value when not connected")
@@ -259,8 +265,8 @@ func (f *Firmata) AnalogWrite(pin int, value int) error {
 
 // FirmwareQuery sends the FirmwareQuery sysex code.
 func (f *Firmata) FirmwareQuery() error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -271,8 +277,8 @@ func (f *Firmata) FirmwareQuery() error {
 
 // PinStateQuery sends a PinStateQuery for pin.
 func (f *Firmata) PinStateQuery(pin int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -283,8 +289,8 @@ func (f *Firmata) PinStateQuery(pin int) error {
 
 // ProtocolVersionQuery sends the ProtocolVersion sysex code.
 func (f *Firmata) ProtocolVersionQuery() error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -295,8 +301,8 @@ func (f *Firmata) ProtocolVersionQuery() error {
 
 // CapabilitiesQuery sends the CapabilityQuery sysex code.
 func (f *Firmata) CapabilitiesQuery() error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -307,8 +313,8 @@ func (f *Firmata) CapabilitiesQuery() error {
 
 // AnalogMappingQuery sends the AnalogMappingQuery sysex code.
 func (f *Firmata) AnalogMappingQuery() error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -320,8 +326,8 @@ func (f *Firmata) AnalogMappingQuery() error {
 // ReportDigital enables or disables digital reporting for pin, a non zero
 // state enables reporting
 func (f *Firmata) ReportDigital(pin int, state int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -339,8 +345,8 @@ func (f *Firmata) ReportDigital(pin int, state int) error {
 // state enables reporting
 // The given pin refers to the offset of the requested pin in the Pins slice.
 func (f *Firmata) ReportAnalog(pin int, state int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -359,8 +365,8 @@ func (f *Firmata) ReportAnalog(pin int, state int) error {
 }
 
 func (f *Firmata) SamplingInterval(intervalMs int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -371,8 +377,8 @@ func (f *Firmata) SamplingInterval(intervalMs int) error {
 
 // I2cRead reads numBytes from address once.
 func (f *Firmata) I2cRead(address int, numBytes int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -384,8 +390,8 @@ func (f *Firmata) I2cRead(address int, numBytes int) error {
 
 // I2cWrite writes data to address.
 func (f *Firmata) I2cWrite(address int, data []byte) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -402,8 +408,8 @@ func (f *Firmata) I2cWrite(address int, data []byte) error {
 // I2cConfig configures the delay in which a register can be read from after it
 // has been written to.
 func (f *Firmata) I2cConfig(delay int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -413,8 +419,8 @@ func (f *Firmata) I2cConfig(delay int) error {
 }
 
 func (f *Firmata) StepperConfigure(devID int, wireCount WireCount, stepType StepType, hasEnable HasEnablePin, pin1 int, pin2 int, pin3 int, pin4 int, enablePin int, invert Inversions) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -439,8 +445,8 @@ func (f *Firmata) StepperConfigure(devID int, wireCount WireCount, stepType Step
 // (in steps). Sending the zero command will reset the position value to zero
 // without moving the stepper.
 func (f *Firmata) StepperZero(devID int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -452,8 +458,8 @@ func (f *Firmata) StepperZero(devID int) error {
 // StepperStep (relative mode)
 // Steps to move is specified as a 32-bit signed long.
 func (f *Firmata) StepperStep(devID int, v int32) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -466,8 +472,8 @@ func (f *Firmata) StepperStep(devID int, v int32) error {
 // Moves a stepper to a desired position based on the number of steps from the
 // zero position. Position is specified as a 32-bit signed long.
 func (f *Firmata) StepperTo(devID int, v int32) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -482,8 +488,8 @@ func (f *Firmata) StepperTo(devID int, v int32) error {
 // motor. When a stepper motor is idle, voltage is still being consumed so if
 // the stepper motor does not need to hold its position use enable to save power.
 func (f *Firmata) StepperEnable(devID int, high IsEnabled) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -497,8 +503,8 @@ func (f *Firmata) StepperEnable(devID int, high IsEnabled) error {
 // client with the position of the motor when stop is completed note: If an
 // acceleration is set, stop will not be immediate.
 func (f *Firmata) StepperStop(devID int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -509,8 +515,8 @@ func (f *Firmata) StepperStop(devID int) error {
 
 // StepperReport requests a position report
 func (f *Firmata) StepperReport(devID int) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -523,8 +529,8 @@ func (f *Firmata) StepperReport(devID int) error {
 // Sets the acceleration/deceleration in steps/sec^2. The accel value is passed
 // using accelStepperFirmata's custom float format
 func (f *Firmata) StepperSetAcceleration(devID int, v float32) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -538,8 +544,8 @@ func (f *Firmata) StepperSetAcceleration(devID int, v float32) error {
 // If acceleration is on (non-zero) sets the maximum speed in steps per second.
 // The speed value is passed using accelStepperFirmata's custom float format.
 func (f *Firmata) StepperSetSpeed(devID int, v float32) error {
-	f.mx.Lock()
-	defer f.mx.Unlock()
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 
 	if !f.connected {
 		return fmt.Errorf("Not connected")
@@ -894,15 +900,15 @@ func mergeAnalogMappingResponse(pins []Pin, data []byte) ([]Pin, []int) {
 }
 
 func (f *Firmata) parseSysEx(data []byte, buf *ringbuffer.RingBuffer) {
-	f.mx.Lock()
-	defer f.mx.Unlock()
-
 	cmd := SysExCommand(data[0])
 	data = data[1:]
 	f.printByteArray(data, "Parsed SysEx %s", cmd)
 
 	switch cmd {
 	case PinStateResponse:
+		f.mx.Lock()
+		defer f.mx.Unlock()
+
 		pin := data[0]
 		f.pins[pin].Mode = int(data[1])
 		f.pins[pin].State = int(data[2])
@@ -955,6 +961,8 @@ func (f *Firmata) parseSysEx(data []byte, buf *ringbuffer.RingBuffer) {
 			}
 			log.Debugf("Stepper reported position %+v", reply)
 
+			f.mx.Lock()
+			defer f.mx.Unlock()
 			if ch, found := f.reportWaits[reply.DeviceID]; found {
 				ch <- reply
 				delete(f.reportWaits, reply.DeviceID)
@@ -972,6 +980,8 @@ func (f *Firmata) parseSysEx(data []byte, buf *ringbuffer.RingBuffer) {
 			}
 			log.Debugf("Stepper reported move complete %+v", reply)
 
+			f.mx.Lock()
+			defer f.mx.Unlock()
 			if ch, found := f.completionWaits[reply.DeviceID]; found {
 				ch <- reply
 				delete(f.completionWaits, reply.DeviceID)
