@@ -796,6 +796,10 @@ func (f *Firmata) process(r *bufio.Reader, buf *ReadLog, wg *sync.WaitGroup) {
 			log.Warnf("Error processing read: %s", f.err)
 			return
 		}
+		if errors.Is(err, io.EOF) {
+			log.Info("file closed")
+			return
+		}
 		if err != nil {
 			f.mx.Lock()
 			f.err = fmt.Errorf("error reading command %s: %s", cmd, err)
