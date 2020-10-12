@@ -88,8 +88,9 @@ func (f *Firmata) Disconnect() (err error) {
 	defer f.mx.Unlock()
 
 	f.err = ErrNotConnected
+	err = f.connection.Close()
 	f.wg.Wait()
-	return f.connection.Close()
+	return err
 }
 
 // Connected returns the current connection state of the Firmata
