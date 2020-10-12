@@ -121,7 +121,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.mx.Unlock()
 
 	var (
-		buf  = NewReadLog(1024, conn)
+		buf  = NewReadLog(1024*1024, conn)
 		r    = bufio.NewReader(buf)
 		data []byte
 	)

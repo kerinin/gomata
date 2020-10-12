@@ -23,7 +23,7 @@ func NewReadLog(capacity int, in io.Reader) *ReadLog {
 
 func (l *ReadLog) Read(p []byte) (n int, err error) {
 	if len(p) > l.buf.Capacity() {
-		return 0, fmt.Errorf("read data won't fit in buffer")
+		return 0, fmt.Errorf("data doesn't fit in buffer: %d required but %d available", len(p), l.buf.Capacity())
 	}
 
 	if toDrop := l.buf.Length() + len(p) - l.buf.Capacity(); toDrop > 0 {
