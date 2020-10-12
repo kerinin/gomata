@@ -187,6 +187,7 @@ github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7V
 github.com/kerinin/doser v0.0.0-20200930234118-00b95691a060 h1:d6P8Ci2KtjG7q6WJwzrhqybZDWmXncdfz6x8E1yg7vQ=
 github.com/kerinin/doser v0.0.0-20201003235652-00f7204b373d h1:hkpjhJgO+W9X52qWUsArgI+msMcdkIxcfsGPAhc0ubQ=
 github.com/kerinin/doser v0.0.0-20201012015327-c754443cc023 h1:QvNyPliL8+ECCo9A6QHga/IFvc8UnkeUoyv5jDKCuls=
+github.com/kerinin/doser v0.0.0-20201012191553-7da63964fba5 h1:v69XDuAfm3mbRiWj/mkw1H2R2r54+fCQ1hLBrWJX5N0=
 github.com/kisielk/errcheck v1.1.0/go.mod h1:EZBBE59ingxPouuu3KfxchcWSUPOHkagtvWXihfKN4Q=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=

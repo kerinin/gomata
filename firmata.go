@@ -85,10 +85,10 @@ func New() *Firmata {
 // Disconnect disconnects the Firmata
 func (f *Firmata) Disconnect() (err error) {
 	f.mx.Lock()
-	defer f.mx.Unlock()
-
 	f.err = ErrNotConnected
 	err = f.connection.Close()
+	f.mx.Unlock()
+
 	f.wg.Wait()
 	return err
 }
