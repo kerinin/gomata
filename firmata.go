@@ -11,7 +11,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/smallnest/ringbuffer"
 )
 
 // Errors
@@ -121,9 +120,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.mx.Unlock()
 
 	var (
-		buf  = ringbuffer.New(1024)
-		tee  = io.TeeReader(conn, buf)
-		r    = bufio.NewReader(tee)
+		r    = bufio.NewReader(conn)
 		data []byte
 	)
 
@@ -179,7 +176,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.mx.Unlock()
 
 	// Firmata creation successful
-	go f.process(r, buf, f.wg)
+	go f.process(r, f.wg)
 	log.Info("Firmata ready to use")
 	return nil
 }
@@ -773,7 +770,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 	}
 }
 
-func (f *Firmata) process(r *bufio.Reader, buf *ringbuffer.RingBuffer, wg *sync.WaitGroup) {
+func (f *Firmata) process(r *bufio.Reader, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
@@ -817,11 +814,10 @@ func (f *Firmata) process(r *bufio.Reader, buf *ringbuffer.RingBuffer, wg *sync.
 			}
 
 		case StartSysex == cmd:
-			f.parseSysEx(data, buf)
+			f.parseSysEx(data)
 
 		default:
 			log.Warnf("Read unexpected command 0x%02X", byte(cmd))
-			f.printByteArray(buf.Bytes(), "buffer")
 		}
 	}
 }
@@ -878,7 +874,7 @@ func mergeAnalogMappingResponse(pins []Pin, data []byte) ([]Pin, []int) {
 	return pins, analogPins
 }
 
-func (f *Firmata) parseSysEx(data []byte, buf *ringbuffer.RingBuffer) {
+func (f *Firmata) parseSysEx(data []byte) {
 	cmd := SysExCommand(data[0])
 	data = data[1:]
 	f.printByteArray(data, "Parsed SysEx %s", cmd)
@@ -975,7 +971,6 @@ func (f *Firmata) parseSysEx(data []byte, buf *ringbuffer.RingBuffer) {
 
 	default:
 		log.Warnf("Unhandled SysEx")
-		f.printByteArray(buf.Bytes(), "buffer")
 	}
 }
 
