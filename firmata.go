@@ -120,7 +120,8 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.mx.Unlock()
 
 	var (
-		r    = bufio.NewReader(conn)
+		buf  = NewReadLog(1024, conn)
+		r    = bufio.NewReader(buf)
 		data []byte
 	)
 
@@ -176,7 +177,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	f.mx.Unlock()
 
 	// Firmata creation successful
-	go f.process(r, f.wg)
+	go f.process(r, buf, f.wg)
 	log.Info("Firmata ready to use")
 	return nil
 }
@@ -770,7 +771,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 	}
 }
 
-func (f *Firmata) process(r *bufio.Reader, wg *sync.WaitGroup) {
+func (f *Firmata) process(r *bufio.Reader, buf *ReadLog, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for {
@@ -814,10 +815,11 @@ func (f *Firmata) process(r *bufio.Reader, wg *sync.WaitGroup) {
 			}
 
 		case StartSysex == cmd:
-			f.parseSysEx(data)
+			f.parseSysEx(data, buf)
 
 		default:
 			log.Warnf("Read unexpected command 0x%02X", byte(cmd))
+			f.printByteArray(buf.Bytes(), "read-buffer")
 		}
 	}
 }
@@ -874,7 +876,7 @@ func mergeAnalogMappingResponse(pins []Pin, data []byte) ([]Pin, []int) {
 	return pins, analogPins
 }
 
-func (f *Firmata) parseSysEx(data []byte) {
+func (f *Firmata) parseSysEx(data []byte, buf *ReadLog) {
 	cmd := SysExCommand(data[0])
 	data = data[1:]
 	f.printByteArray(data, "Parsed SysEx %s", cmd)
@@ -971,6 +973,7 @@ func (f *Firmata) parseSysEx(data []byte) {
 
 	default:
 		log.Warnf("Unhandled SysEx")
+		f.printByteArray(buf.Bytes(), "read-buffer")
 	}
 }
 
