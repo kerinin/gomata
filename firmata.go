@@ -797,7 +797,11 @@ func (f *Firmata) process(r *bufio.Reader, buf *ReadLog, wg *sync.WaitGroup) {
 			return
 		}
 		if errors.Is(err, io.EOF) {
-			log.Info("file closed")
+			f.mx.Lock()
+			f.err = err
+			f.mx.Unlock()
+
+			log.Warnf("File closed")
 			return
 		}
 		if err != nil {

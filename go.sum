@@ -190,6 +190,7 @@ github.com/kerinin/doser v0.0.0-20201012015327-c754443cc023 h1:QvNyPliL8+ECCo9A6
 github.com/kerinin/doser v0.0.0-20201012191553-7da63964fba5 h1:v69XDuAfm3mbRiWj/mkw1H2R2r54+fCQ1hLBrWJX5N0=
 github.com/kerinin/doser v0.0.0-20201012193832-4ae0c66be146 h1:v73QxmladAriB9/Rt10ZGYEGXmRtRqqyG0ymzfKeK8s=
 github.com/kerinin/doser v0.0.0-20201012200035-e0dab9278464 h1:Fpx8tX7/wUgewyK3b2V15lnoQBNsVxb3qU3REFInwQo=
+github.com/kerinin/doser v0.0.0-20201012235057-671fe90508e9 h1:KIjO44CeCOqWveu+Z9p3S2n21obOGpx1e+sWujqq1EY=
 github.com/kisielk/errcheck v1.1.0/go.mod h1:EZBBE59ingxPouuu3KfxchcWSUPOHkagtvWXihfKN4Q=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
