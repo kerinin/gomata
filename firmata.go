@@ -139,6 +139,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	}
 	data, err = f.readNextSysEx(r, FirmwareQuery)
 	if err != nil {
+		f.printByteArray(buf.Bytes(), "read-buffer")
 		return fmt.Errorf("getting firmware: %w", err)
 	}
 	f.FirmwareName = parseFirmware(data)
@@ -151,6 +152,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	}
 	data, err = f.readNextSysEx(r, CapabilityResponse)
 	if err != nil {
+		f.printByteArray(buf.Bytes(), "read-buffer")
 		return fmt.Errorf("getting capabilities: %w", err)
 	}
 	f.mx.Lock()
@@ -164,6 +166,7 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	}
 	data, err = f.readNextSysEx(r, AnalogMappingResponse)
 	if err != nil {
+		f.printByteArray(buf.Bytes(), "read-buffer")
 		return fmt.Errorf("getting analog mapping: %w", err)
 	}
 	f.mx.Lock()
@@ -705,8 +708,7 @@ func (f *Firmata) readNextSysEx(r *bufio.Reader, searchCmd SysExCommand) ([]byte
 			return nil, fmt.Errorf("reading command: %w", err)
 		}
 		if cmd != StartSysex {
-			log.Infof("ignoring command %s, waiting for %s", cmd, searchCmd)
-			continue
+			return nil, fmt.Errorf("unexpected command %s, waiting for %s", cmd, searchCmd)
 		}
 
 		sysExCommand := SysExCommand(data[0])
@@ -714,12 +716,11 @@ func (f *Firmata) readNextSysEx(r *bufio.Reader, searchCmd SysExCommand) ([]byte
 			switch sysExCommand {
 			case StringData:
 				str := data[1:]
-				log.Warnf("ignoring StringData (waiting for %s): '%v'", searchCmd, string(str[:len(str)-1]))
+				return nil, fmt.Errorf("unexpected StringData (waiting for %s): '%v'", searchCmd, string(str[:len(str)-1]))
 
 			default:
-				log.Infof("ignoring sysex command %s != %s", sysExCommand, searchCmd)
+				return nil, fmt.Errorf("unexpected sysex command %s != %s", sysExCommand, searchCmd)
 			}
-			continue
 		}
 
 		return data[1 : len(data)-1], nil
