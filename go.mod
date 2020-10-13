@@ -8,6 +8,7 @@ require (
 	github.com/huin/goserial v0.0.0-20121012073615-7b90efdb22b1
 	github.com/jacobsa/go-serial v0.0.0-20180131005756-15cf729a72d4
 	github.com/kraman/go-firmata v0.0.0-20140709180207-8083dbe684b7
+	github.com/pkg/term v1.1.0 // indirect
 	github.com/rubenv/sql-migrate v0.0.0-20200616145509-8d140a17f351 // indirect
 	github.com/sirupsen/logrus v1.6.0
 	github.com/smallnest/ringbuffer v0.0.0-20200331140504-3a38e8060b89

@@ -37,7 +37,6 @@ type Firmata struct {
 	pinStates         chan Pin
 	reportWaits       map[int32]chan StepperPosition
 	completionWaits   map[int32]chan StepperPosition
-	wg                *sync.WaitGroup
 }
 
 // Pin represents a pin on the firmata board
@@ -92,7 +91,6 @@ func (f *Firmata) Disconnect() (err error) {
 		log.Warnf("Failed to close connection: %s", err)
 	}
 
-	f.wg.Wait()
 	return err
 }
 
@@ -177,12 +175,10 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 
 	// Start threads
 	f.err = nil
-	f.wg = &sync.WaitGroup{}
-	f.wg.Add(1)
 	f.mx.Unlock()
 
 	// Firmata creation successful
-	go f.process(r, buf, f.wg)
+	go f.process(r, buf)
 	log.Info("Firmata ready to use")
 	return nil
 }
@@ -776,9 +772,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 	}
 }
 
-func (f *Firmata) process(r *bufio.Reader, buf *ReadLog, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func (f *Firmata) process(r *bufio.Reader, buf *ReadLog) {
 	for {
 		f.mx.RLock()
 		if f.err != nil {
