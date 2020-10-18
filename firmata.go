@@ -136,8 +136,6 @@ func (f *Firmata) Connect() (err error) {
 	if err != nil {
 		return fmt.Errorf("resetting firmata: %w", err)
 	}
-
-	// Get firmware
 	err = f.firmwareQuery()
 	if err != nil {
 		return fmt.Errorf("querying firmware: %w", err)
@@ -146,14 +144,6 @@ func (f *Firmata) Connect() (err error) {
 	if err != nil {
 		return fmt.Errorf("draining serial connection: %w", err)
 	}
-
-	// data, err = f.readNextSysEx(r, FirmwareQuery)
-	// if err != nil {
-	// 	f.printByteArray(buf.Bytes(), "read-buffer")
-	// 	return fmt.Errorf("getting firmware: %w", err)
-	// }
-	// f.FirmwareName = parseFirmware(data)
-	// log.Infof("Firmware: %s", f.FirmwareName)
 
 	// Get capabilities
 	err = f.capabilitiesQuery()
@@ -212,8 +202,6 @@ func (f *Firmata) reset() error {
 	if err != nil {
 		return err
 	}
-	log.Infof("Waiting 1s for reset...")
-	<-time.After(1 * time.Second)
 	return nil
 }
 
