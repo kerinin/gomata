@@ -2,6 +2,7 @@ package gomata
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ type Firmata struct {
 
 	// Mutex covers the following fields
 	mx                *sync.RWMutex
+	cancel            context.CancelFunc
 	err               error
 	connection        io.ReadWriteCloser
 	analogPins        []int
@@ -90,6 +92,7 @@ func New(serialPort string, baud int) *Firmata {
 func (f *Firmata) Close() (err error) {
 	f.mx.Lock()
 	f.err = ErrNotConnected
+	f.cancel()
 	err = f.connection.Close()
 	f.mx.Unlock()
 	if err != nil {
@@ -106,6 +109,8 @@ func (f *Firmata) Connect() (err error) {
 	if f.err == nil {
 		return ErrConnected
 	}
+
+	log.Infof("Connecting to firmata on %s at %d baud", f.serialPort, f.baud)
 
 	port, err := term.Open(
 		f.serialPort,
@@ -137,13 +142,18 @@ func (f *Firmata) Connect() (err error) {
 	if err != nil {
 		return fmt.Errorf("querying firmware: %w", err)
 	}
-	data, err = f.readNextSysEx(r, FirmwareQuery)
+	_, err = r.ReadBytes(0xF7) // drain the connection until we get to the end of a sysex
 	if err != nil {
-		f.printByteArray(buf.Bytes(), "read-buffer")
-		return fmt.Errorf("getting firmware: %w", err)
+		return fmt.Errorf("draining serial connection: %w", err)
 	}
-	f.FirmwareName = parseFirmware(data)
-	log.Infof("Firmware: %s", f.FirmwareName)
+
+	// data, err = f.readNextSysEx(r, FirmwareQuery)
+	// if err != nil {
+	// 	f.printByteArray(buf.Bytes(), "read-buffer")
+	// 	return fmt.Errorf("getting firmware: %w", err)
+	// }
+	// f.FirmwareName = parseFirmware(data)
+	// log.Infof("Firmware: %s", f.FirmwareName)
 
 	// Get capabilities
 	err = f.capabilitiesQuery()
@@ -178,10 +188,12 @@ func (f *Firmata) Connect() (err error) {
 
 	// Start threads
 	f.err = nil
+	processCtx, cancel := context.WithCancel(context.Background())
+	f.cancel = cancel
 	f.mx.Unlock()
 
 	// Firmata creation successful
-	go f.process(r, buf)
+	go f.process(processCtx, r, buf)
 	log.Info("Firmata ready to use")
 	return nil
 }
@@ -782,8 +794,12 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 	}
 }
 
-func (f *Firmata) process(r *bufio.Reader, buf *ReadLog) {
+func (f *Firmata) process(ctx context.Context, r *bufio.Reader, buf *ReadLog) {
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+
 		f.mx.RLock()
 		if f.err != nil {
 			f.mx.RUnlock()
@@ -792,6 +808,9 @@ func (f *Firmata) process(r *bufio.Reader, buf *ReadLog) {
 		f.mx.RUnlock()
 
 		cmd, data, err := f.readCommand(r)
+		if ctx.Err() != nil {
+			return
+		}
 		if errors.Is(err, os.ErrClosed) {
 			f.mx.Lock()
 			f.err = fmt.Errorf("attempted to read closed file: %s", err)
