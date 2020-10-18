@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/huin/goserial"
 	"github.com/kerinin/gomata"
 	log "github.com/sirupsen/logrus"
 )
@@ -27,22 +26,14 @@ func main() {
 	flag.Parse()
 	log.SetLevel(log.DebugLevel)
 
-	log.Infof("opening port")
-	config := &goserial.Config{Name: *serialPort, Baud: *baud}
-	port, err := goserial.OpenPort(config)
-	if err != nil {
-		log.Fatalf("failed to open serial port: %s", err)
-	}
-	defer port.Close()
-	log.Infof("opened port, creating firmata...")
+	f := gomata.New(*serialPort, *baud)
 
-	f := gomata.New()
-
-	err = f.Connect(port)
+	err := f.Connect()
 	if err != nil {
 		log.Fatalf("failed to connect to serial port: %s", err)
 	}
 	log.Infof("Created firmata")
+	defer f.Close()
 
 	err = f.SamplingInterval(500)
 	if err != nil {

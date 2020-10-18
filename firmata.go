@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/term"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -19,6 +20,8 @@ var ErrConnected = errors.New("client is alredy connected")
 
 // Firmata represents a client connection to a firmata board
 type Firmata struct {
+	serialPort             string
+	baud                   int
 	pins                   []Pin
 	FirmwareName           string
 	ProtocolVersion        string
@@ -61,8 +64,10 @@ type StepperPosition struct {
 }
 
 // New returns a new Firmata
-func New() *Firmata {
+func New(serialPort string, baud int) *Firmata {
 	c := &Firmata{
+		serialPort:             serialPort,
+		baud:                   baud,
 		ProtocolVersion:        "",
 		FirmwareName:           "",
 		connection:             nil,
@@ -81,8 +86,8 @@ func New() *Firmata {
 	return c
 }
 
-// Disconnect disconnects the Firmata
-func (f *Firmata) Disconnect() (err error) {
+// Closes the serial connection
+func (f *Firmata) Close() (err error) {
 	f.mx.Lock()
 	f.err = ErrNotConnected
 	err = f.connection.Close()
@@ -94,43 +99,38 @@ func (f *Firmata) Disconnect() (err error) {
 	return err
 }
 
-// Connected returns the current connection state of the Firmata
-func (f *Firmata) Connected() bool {
-	f.mx.RLock()
-	defer f.mx.RUnlock()
-
-	return f.err == nil
-}
-
-// Pins returns all available pins
-func (f *Firmata) Pins() []Pin {
-	f.mx.RLock()
-	defer f.mx.RUnlock()
-
-	return f.pins
-}
-
 // Connect connects to the Firmata given conn. It first resets the firmata board
 // then continuously polls the firmata board for new information when it's
 // available.
-func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
+func (f *Firmata) Connect() (err error) {
 	if f.err == nil {
 		return ErrConnected
 	}
 
+	port, err := term.Open(
+		f.serialPort,
+		term.Speed(int(f.baud)),
+		term.RawMode,
+	)
+
+	if err != nil {
+		return fmt.Errorf("opening serial port: %w", err)
+	}
+
 	f.mx.Lock()
-	f.connection = conn
+	f.connection = port
 	f.mx.Unlock()
 
 	var (
-		buf  = NewReadLog(1024*1024, conn)
+		buf  = NewReadLog(1024*1024, port)
 		r    = bufio.NewReader(buf)
 		data []byte
 	)
 
-	err = f.Reset()
-	log.Infof("Waiting 1s for reset...")
-	<-time.After(1 * time.Second)
+	err = f.reset()
+	if err != nil {
+		return fmt.Errorf("resetting firmata: %w", err)
+	}
 
 	// Get firmware
 	err = f.firmwareQuery()
@@ -186,16 +186,23 @@ func (f *Firmata) Connect(conn io.ReadWriteCloser) (err error) {
 	return nil
 }
 
-// Reset sends the SystemReset sysex code.
-func (f *Firmata) Reset() error {
+// Pins returns all available pins
+func (f *Firmata) Pins() []Pin {
 	f.mx.RLock()
 	defer f.mx.RUnlock()
 
-	if f.err != nil {
-		return f.err
-	}
+	return f.pins
+}
 
-	return f.write([]byte{byte(SystemReset)}, "--> Reset")
+// Reset sends the SystemReset sysex code.
+func (f *Firmata) reset() error {
+	err := f.write([]byte{byte(SystemReset)}, "--> Reset")
+	if err != nil {
+		return err
+	}
+	log.Infof("Waiting 1s for reset...")
+	<-time.After(1 * time.Second)
+	return nil
 }
 
 // SetPinMode sets the pin to mode.
@@ -719,6 +726,7 @@ func (f *Firmata) readNextSysEx(r *bufio.Reader, searchCmd SysExCommand) ([]byte
 				return nil, fmt.Errorf("unexpected StringData (waiting for %s): '%v'", searchCmd, string(str[:len(str)-1]))
 
 			default:
+				f.reset()
 				return nil, fmt.Errorf("unexpected sysex command %s != %s", sysExCommand, searchCmd)
 			}
 		}
@@ -769,6 +777,7 @@ func (f *Firmata) readCommand(r *bufio.Reader) (FirmataCommand, []byte, error) {
 		return StartSysex, buf, nil
 
 	default:
+		f.reset()
 		return cmd, nil, nil
 	}
 }
@@ -853,6 +862,7 @@ func (f *Firmata) process(r *bufio.Reader, buf *ReadLog) {
 
 			log.Warnf("Error processing input: %s", f.err)
 			f.printByteArray(buf.Bytes(), "read-buffer")
+			f.reset()
 			return
 		}
 	}
@@ -1006,6 +1016,7 @@ func (f *Firmata) parseSysEx(data []byte, buf *ReadLog) error {
 		}
 
 	default:
+		f.reset()
 		return fmt.Errorf("Read unexpected sysex 0x%02X", byte(cmd))
 	}
 
